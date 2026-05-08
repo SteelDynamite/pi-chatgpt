@@ -10,19 +10,13 @@ Footer:
 
 ![Footer preview](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/footer-preview.png)
 
-Footer display variants:
+Footer display variants and color thresholds:
 
-![All footer variants](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/all-footer-variants.png)
-
-Footer color thresholds:
-
-![Footer color thresholds](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/footer-color-thresholds.png)
+![Footer display variants and color thresholds](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/footer-variants-readable.png)
 
 Detailed usage command:
 
 ![Command preview](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/command-preview.png)
-
-The screenshots are also referenced from [issue #1](https://github.com/patlux/pi-chatgpt-limit/issues/1) and are kept out of git history so they are not downloaded when installing this pi package.
 
 ## Install
 
