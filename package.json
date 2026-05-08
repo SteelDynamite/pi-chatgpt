@@ -3,6 +3,11 @@
   "version": "0.1.3",
   "description": "Show ChatGPT Codex subscription usage in pi's footer",
   "type": "module",
+  "scripts": {
+    "test": "node --test test/e2e/*.test.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -23,6 +28,9 @@
     "README.md",
     "LICENSE"
   ],
+  "devDependencies": {
+    "prettier": "^3.8.3"
+  },
   "pi": {
     "extensions": [
       "./extensions/chatgpt-weekly-limit.js"
