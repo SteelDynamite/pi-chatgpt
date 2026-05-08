@@ -6,8 +6,6 @@ It displays configurable ChatGPT Pro/Codex usage next to the active Codex model,
 
 ## Preview
 
-Footer:
-
 ![Footer preview](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/footer-preview.png)
 
 Footer display variants and color thresholds:
