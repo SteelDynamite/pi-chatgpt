@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
 import { once } from "node:events"
 import { existsSync } from "node:fs"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import http from "node:http"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -37,6 +37,35 @@ async function startUsageServer(handler) {
         server.close((error) => (error ? reject(error) : resolveClose())),
       ),
   }
+}
+
+function sendUsageResponse(res, options = {}) {
+  const {
+    planType,
+    fiveHourUsed = 25,
+    weeklyUsed = 42,
+    fiveHourResetSeconds = 2 * 60 * 60,
+    weeklyResetSeconds = 2 * 24 * 60 * 60,
+  } = options
+
+  res.writeHead(200, { "content-type": "application/json" })
+  res.end(
+    JSON.stringify({
+      ...(planType ? { plan_type: planType } : {}),
+      rate_limit: {
+        primary_window: {
+          used_percent: fiveHourUsed,
+          limit_window_seconds: 5 * 60 * 60,
+          reset_at: Math.floor(Date.now() / 1000) + fiveHourResetSeconds,
+        },
+        secondary_window: {
+          used_percent: weeklyUsed,
+          limit_window_seconds: 7 * 24 * 60 * 60,
+          reset_at: Math.floor(Date.now() / 1000) + weeklyResetSeconds,
+        },
+      },
+    }),
+  )
 }
 
 function shellQuote(value) {
@@ -88,6 +117,12 @@ function expectBlock(pattern) {
   return `expect {\n  ${tclDoubleQuote(pattern)} {}\n  timeout { exit 1 }\n  eof { exit 1 }\n}`
 }
 
+function stripAnsi(value) {
+  return String(value)
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
+}
+
 function buildPiArgs(apiKey) {
   return [
     "--no-extensions",
@@ -111,6 +146,9 @@ async function runRealPiTui({
   baseUrl,
   apiKey,
   extraEnv = {},
+  initialConfig,
+  waitFor = (text) => text.includes("42%") && text.includes("gpt-5.5"),
+  settleMs = 0,
   timeoutMs = 8000,
 }) {
   if (
@@ -126,6 +164,14 @@ async function runRealPiTui({
   const outputFile = join(tempDir, "typescript.log")
   const agentDir = join(tempDir, "agent")
   const sessionDir = join(tempDir, "sessions")
+
+  if (initialConfig) {
+    await mkdir(agentDir, { recursive: true })
+    await writeFile(
+      join(agentDir, "chatgpt-limit.json"),
+      `${JSON.stringify(initialConfig, null, 2)}\n`,
+    )
+  }
 
   const piArgs = buildPiArgs(apiKey)
 
@@ -145,11 +191,11 @@ async function runRealPiTui({
   })
 
   try {
-    const output = await waitForOutput(
-      outputFile,
-      (text) => text.includes("42%") && text.includes("gpt-5.5"),
-      timeoutMs,
-    )
+    let output = await waitForOutput(outputFile, waitFor, timeoutMs)
+    if (settleMs > 0) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, settleMs))
+      output = await readIfExists(outputFile)
+    }
     return { output, outputFile }
   } finally {
     try {
@@ -170,6 +216,10 @@ async function runRealPiTuiExpect({
   optionKeys,
   submenuText,
   expectText,
+  expectedConfig,
+  initialConfig,
+  scriptBody,
+  settleMs = 100,
   extraEnv = {},
   timeoutMs = 12000,
 }) {
@@ -186,6 +236,14 @@ async function runRealPiTuiExpect({
   const expectFile = join(tempDir, "test.exp")
   const agentDir = join(tempDir, "agent")
   const sessionDir = join(tempDir, "sessions")
+  if (initialConfig) {
+    await mkdir(agentDir, { recursive: true })
+    await writeFile(
+      join(agentDir, "chatgpt-limit.json"),
+      `${JSON.stringify(initialConfig, null, 2)}\n`,
+    )
+  }
+
   const piArgs = buildPiArgs(apiKey).map(tclDoubleQuote).join(" ")
   const env = {
     CHATGPT_BASE_URL: baseUrl,
@@ -201,6 +259,14 @@ async function runRealPiTuiExpect({
     .map(([key, value]) => `set env(${key}) ${tclDoubleQuote(value)}`)
     .join("\n")
 
+  const body =
+    scriptBody ??
+    `${expectBlock("Configure footer display mode")}
+send "${expectSendLiteral(mainKeys)}"
+${expectBlock(submenuText)}
+send "${expectSendLiteral(optionKeys)}"
+${expectBlock(expectText)}`
+
   await writeFile(
     expectFile,
     `log_file -noappend ${tclDoubleQuote(outputFile)}
@@ -211,11 +277,8 @@ set pi_pid [exp_pid]
 stty columns 160 rows 40
 after 1500
 send "/chatgpt-limit\\r"
-${expectBlock("Configure footer display mode")}
-send "${expectSendLiteral(mainKeys)}"
-${expectBlock(submenuText)}
-send "${expectSendLiteral(optionKeys)}"
-${expectBlock(expectText)}
+${body}
+after ${settleMs}
 catch {exec kill -TERM $pi_pid}
 after 100
 catch {exec kill -KILL $pi_pid}
@@ -233,6 +296,14 @@ close
     })
     const output = await readIfExists(outputFile)
     assert.equal(status, 0, output)
+    if (expectedConfig) {
+      assert.deepEqual(
+        JSON.parse(
+          await readFile(join(agentDir, "chatgpt-limit.json"), "utf8"),
+        ),
+        expectedConfig,
+      )
+    }
     return output
   } finally {
     await rm(tempDir, { recursive: true, force: true })
@@ -255,24 +326,13 @@ test("real pi TUI renders the ChatGPT weekly percentage in the footer", async ()
     assert.equal(req.headers.authorization, `Bearer ${token}`)
     assert.equal(req.headers["chatgpt-account-id"], "acct_test")
 
-    res.writeHead(200, { "content-type": "application/json" })
-    res.end(
-      JSON.stringify({
-        plan_type: "pro",
-        rate_limit: {
-          primary_window: {
-            used_percent: 25.4,
-            limit_window_seconds: 5 * 60 * 60,
-            reset_at: Math.floor(Date.now() / 1000) + 3600,
-          },
-          secondary_window: {
-            used_percent: 42.2,
-            limit_window_seconds: 7 * 24 * 60 * 60,
-            reset_at: Math.floor(Date.now() / 1000) + 86400,
-          },
-        },
-      }),
-    )
+    sendUsageResponse(res, {
+      planType: "pro",
+      fiveHourUsed: 25.4,
+      weeklyUsed: 42.2,
+      fiveHourResetSeconds: 3600,
+      weeklyResetSeconds: 86400,
+    })
   })
 
   try {
@@ -292,6 +352,95 @@ test("real pi TUI renders the ChatGPT weekly percentage in the footer", async ()
   }
 })
 
+test("real pi TUI loads global footer configuration", async (t) => {
+  const token = fakeJwt({
+    "https://api.openai.com/auth": { chatgpt_account_id: "acct_global" },
+  })
+  const server = await startUsageServer((_req, res) => {
+    sendUsageResponse(res)
+  })
+
+  try {
+    await t.test("custom display", async () => {
+      const { output } = await runRealPiTui({
+        baseUrl: server.baseUrl,
+        apiKey: token,
+        initialConfig: { quotaWindow: "both", displayMode: "remaining" },
+        waitFor: (text) => stripAnsi(text).includes("5h 75% left / W 58% left"),
+      })
+
+      assert.match(stripAnsi(output), /5h 75% left \/ W 58% left/)
+    })
+
+    await t.test("hidden display", async () => {
+      const requestCount = server.requests.length
+      const { output } = await runRealPiTui({
+        baseUrl: server.baseUrl,
+        apiKey: token,
+        initialConfig: { quotaWindow: "hidden", displayMode: "used" },
+        waitFor: (text) =>
+          server.requests.length > requestCount &&
+          stripAnsi(text).includes("gpt-5.5"),
+        settleMs: 500,
+      })
+
+      assert.doesNotMatch(stripAnsi(output), /W 42%|5h 25%/)
+    })
+  } finally {
+    await server.close()
+  }
+})
+
+test("real pi TUI cancels footer previews and resets defaults", async () => {
+  const down = "\\033\\[B"
+  const enter = "\\r"
+  const escape = "\\033"
+  const displayModeMenu = `${down}${down}${enter}`
+  const resetMenu = `${down}${down}${down}${enter}`
+  const defaultConfig = { quotaWindow: "weekly", displayMode: "used" }
+  const token = fakeJwt({
+    "https://api.openai.com/auth": { chatgpt_account_id: "acct_reset" },
+  })
+  const server = await startUsageServer((_req, res) => {
+    sendUsageResponse(res)
+  })
+
+  try {
+    const previewOutput = await runRealPiTuiExpect({
+      baseUrl: server.baseUrl,
+      apiKey: token,
+      initialConfig: defaultConfig,
+      expectedConfig: defaultConfig,
+      scriptBody: `${expectBlock("Configure footer display mode")}
+send "${expectSendLiteral(displayModeMenu)}"
+${expectBlock("How should the footer value be shown?")}
+send "${expectSendLiteral(down)}"
+${expectBlock("W 42% · ~2d")}
+send "${expectSendLiteral(escape)}"
+${expectBlock("gpt-5.5")}`,
+    })
+    const previewText = stripAnsi(previewOutput)
+    const previewIndex = previewText.lastIndexOf("W 42% · ~2d")
+    assert.ok(previewIndex >= 0, previewText)
+    assert.ok(previewText.lastIndexOf("W 42%") > previewIndex, previewText)
+
+    const resetOutput = await runRealPiTuiExpect({
+      baseUrl: server.baseUrl,
+      apiKey: token,
+      initialConfig: { quotaWindow: "both", displayMode: "remainingCompact" },
+      expectedConfig: defaultConfig,
+      scriptBody: `${expectBlock("Reset footer settings to defaults")}
+send "${expectSendLiteral(resetMenu)}"
+${expectBlock("Reset ChatGPT footer settings?")}
+send "${expectSendLiteral(enter)}"
+${expectBlock("ChatGPT footer settings reset to defaults.")}`,
+    })
+    assert.match(stripAnsi(resetOutput), /settings reset to defaults/)
+  } finally {
+    await server.close()
+  }
+})
+
 test("real pi TUI previews and saves footer display configuration options", async (t) => {
   const down = "\\033\\[B"
   const enter = "\\r"
@@ -304,6 +453,7 @@ test("real pi TUI previews and saves footer display configuration options", asyn
       optionKeys: `${down}${enter}`,
       submenuText: "Display which ChatGPT limit in footer?",
       expectText: "ChatGPT footer display: 5-hour usage",
+      expectedConfig: { quotaWindow: "fiveHour", displayMode: "used" },
     },
     {
       name: "both 5-hour and weekly limits",
@@ -311,13 +461,16 @@ test("real pi TUI previews and saves footer display configuration options", asyn
       optionKeys: `${down}${down}${enter}`,
       submenuText: "Display which ChatGPT limit in footer?",
       expectText: "ChatGPT footer display: Both 5-hour and weekly",
+      expectedConfig: { quotaWindow: "both", displayMode: "used" },
     },
     {
       name: "hidden footer limit",
       mainKeys: footerLimitMenu,
       optionKeys: `${down}${down}${down}${enter}`,
       submenuText: "Display which ChatGPT limit in footer?",
-      expectText: "ChatGPT footer display: Hide usage from footer",
+      expectText:
+        "ChatGPT footer display: Hide usage from footer (usage hidden).",
+      expectedConfig: { quotaWindow: "hidden", displayMode: "used" },
     },
     {
       name: "used percent with reset",
@@ -326,6 +479,7 @@ test("real pi TUI previews and saves footer display configuration options", asyn
       submenuText: "How should the footer value be shown?",
       expectText:
         "ChatGPT footer mode: Used percent with reset, e.g. W 42% · ~2d",
+      expectedConfig: { quotaWindow: "weekly", displayMode: "compact" },
     },
     {
       name: "remaining percent",
@@ -333,6 +487,7 @@ test("real pi TUI previews and saves footer display configuration options", asyn
       optionKeys: `${down}${down}${enter}`,
       submenuText: "How should the footer value be shown?",
       expectText: "ChatGPT footer mode: Remaining percent, e.g. W 58% left",
+      expectedConfig: { quotaWindow: "weekly", displayMode: "remaining" },
     },
     {
       name: "remaining percent with reset",
@@ -341,6 +496,10 @@ test("real pi TUI previews and saves footer display configuration options", asyn
       submenuText: "How should the footer value be shown?",
       expectText:
         "ChatGPT footer mode: Remaining percent with reset, e.g. W 58% left · ~2d",
+      expectedConfig: {
+        quotaWindow: "weekly",
+        displayMode: "remainingCompact",
+      },
     },
   ]
 
@@ -350,23 +509,7 @@ test("real pi TUI previews and saves footer display configuration options", asyn
         "https://api.openai.com/auth": { chatgpt_account_id: "acct_config" },
       })
       const server = await startUsageServer((_req, res) => {
-        res.writeHead(200, { "content-type": "application/json" })
-        res.end(
-          JSON.stringify({
-            rate_limit: {
-              primary_window: {
-                used_percent: 25,
-                limit_window_seconds: 5 * 60 * 60,
-                reset_at: Math.floor(Date.now() / 1000) + 2 * 60 * 60,
-              },
-              secondary_window: {
-                used_percent: 42,
-                limit_window_seconds: 7 * 24 * 60 * 60,
-                reset_at: Math.floor(Date.now() / 1000) + 2 * 24 * 60 * 60,
-              },
-            },
-          }),
-        )
+        sendUsageResponse(res)
       })
 
       try {
@@ -377,6 +520,7 @@ test("real pi TUI previews and saves footer display configuration options", asyn
           optionKeys: testCase.optionKeys,
           submenuText: testCase.submenuText,
           expectText: testCase.expectText,
+          expectedConfig: testCase.expectedConfig,
         })
       } finally {
         await server.close()
@@ -391,23 +535,11 @@ test("real pi TUI still fetches usage when PI_OFFLINE is set", async () => {
   })
 
   const server = await startUsageServer((_req, res) => {
-    res.writeHead(200, { "content-type": "application/json" })
-    res.end(
-      JSON.stringify({
-        rate_limit: {
-          primary_window: {
-            used_percent: 1,
-            limit_window_seconds: 5 * 60 * 60,
-            reset_at: Math.floor(Date.now() / 1000) + 3600,
-          },
-          secondary_window: {
-            used_percent: 42,
-            limit_window_seconds: 7 * 24 * 60 * 60,
-            reset_at: Math.floor(Date.now() / 1000) + 86400,
-          },
-        },
-      }),
-    )
+    sendUsageResponse(res, {
+      fiveHourUsed: 1,
+      fiveHourResetSeconds: 3600,
+      weeklyResetSeconds: 86400,
+    })
   })
 
   try {
