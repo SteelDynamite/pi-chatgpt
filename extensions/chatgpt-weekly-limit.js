@@ -5,6 +5,10 @@
  *   GET https://chatgpt.com/backend-api/wham/usage
  */
 
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { dirname, join } from "node:path"
+
 import {
   Key,
   matchesKey,
@@ -20,6 +24,7 @@ const OPENAI_PROFILE_CLAIM = "https://api.openai.com/profile"
 const FIVE_HOUR_SECONDS = 5 * 60 * 60
 const WEEK_SECONDS = 7 * 24 * 60 * 60
 const CONFIG_ENTRY_TYPE = "chatgpt-limit-config"
+const CONFIG_FILE_NAME = "chatgpt-limit.json"
 
 const DEFAULT_FOOTER_CONFIG = {
   quotaWindow: "weekly",
@@ -204,13 +209,43 @@ function normalizeFooterConfig(value) {
   return { quotaWindow, displayMode }
 }
 
-function restoreFooterConfig(ctx) {
-  footerConfig = { ...DEFAULT_FOOTER_CONFIG }
+function getConfigPath() {
+  const agentDir =
+    process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent")
+  return join(agentDir, CONFIG_FILE_NAME)
+}
+
+async function readGlobalFooterConfig() {
+  try {
+    return normalizeFooterConfig(
+      JSON.parse(await readFile(getConfigPath(), "utf8")),
+    )
+  } catch {
+    return undefined
+  }
+}
+
+async function writeGlobalFooterConfig(config) {
+  const configPath = getConfigPath()
+  const tempPath = `${configPath}.${process.pid}.tmp`
+  await mkdir(dirname(configPath), { recursive: true })
+  await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`)
+  await rename(tempPath, configPath)
+}
+
+async function restoreFooterConfig(ctx) {
+  footerConfig =
+    (await readGlobalFooterConfig()) || restoreLegacySessionFooterConfig(ctx)
+}
+
+function restoreLegacySessionFooterConfig(ctx) {
+  let config = { ...DEFAULT_FOOTER_CONFIG }
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type === "custom" && entry.customType === CONFIG_ENTRY_TYPE) {
-      footerConfig = normalizeFooterConfig(entry.data)
+      config = normalizeFooterConfig(entry.data)
     }
   }
+  return config
 }
 
 function describeFooterConfig() {
@@ -223,10 +258,10 @@ function describeFooterConfig() {
   return `${quotaWindow?.label || "Weekly usage"}; ${displayMode?.label || "Used percent"}`
 }
 
-function saveFooterConfig(pi, nextConfig) {
+async function saveFooterConfig(nextConfig) {
   footerConfig = normalizeFooterConfig(nextConfig)
-  pi.appendEntry(CONFIG_ENTRY_TYPE, footerConfig)
   requestRender()
+  await writeGlobalFooterConfig(footerConfig)
 }
 
 /** @param {import('@mariozechner/pi-ai').AssistantMessage['usage']} usage */
@@ -587,7 +622,7 @@ async function selectFooterConfigOption(
   return selected
 }
 
-async function configureQuotaWindow(pi, ctx) {
+async function configureQuotaWindow(ctx) {
   const selected = await selectFooterConfigOption(
     ctx,
     "Display which ChatGPT limit in footer?",
@@ -599,11 +634,16 @@ async function configureQuotaWindow(pi, ctx) {
   )
   if (!selected) return
 
-  saveFooterConfig(pi, { ...footerConfig, quotaWindow: selected.value })
-  ctx.ui.notify(`ChatGPT footer display: ${selected.label}`, "info")
+  await saveFooterConfig({ ...footerConfig, quotaWindow: selected.value })
+  ctx.ui.notify(
+    selected.value === "hidden"
+      ? "ChatGPT footer display: Hide usage from footer (usage hidden)."
+      : `ChatGPT footer display: ${selected.label}`,
+    "info",
+  )
 }
 
-async function configureDisplayMode(pi, ctx) {
+async function configureDisplayMode(ctx) {
   const selected = await selectFooterConfigOption(
     ctx,
     "How should the footer value be shown?",
@@ -615,8 +655,19 @@ async function configureDisplayMode(pi, ctx) {
   )
   if (!selected) return
 
-  saveFooterConfig(pi, { ...footerConfig, displayMode: selected.value })
+  await saveFooterConfig({ ...footerConfig, displayMode: selected.value })
   ctx.ui.notify(`ChatGPT footer mode: ${selected.label}`, "info")
+}
+
+async function resetFooterConfig(ctx) {
+  const confirmed = await ctx.ui.confirm(
+    "Reset ChatGPT footer settings?",
+    "This restores the default footer display: weekly usage, used percent.",
+  )
+  if (!confirmed) return
+
+  await saveFooterConfig(DEFAULT_FOOTER_CONFIG)
+  ctx.ui.notify("ChatGPT footer settings reset to defaults.", "info")
 }
 
 export default function (pi) {
@@ -631,8 +682,8 @@ export default function (pi) {
     void queueUpdate(ctx).catch(() => undefined)
   }
 
-  pi.on("session_start", (_event, ctx) => {
-    restoreFooterConfig(ctx)
+  pi.on("session_start", async (_event, ctx) => {
+    await restoreFooterConfig(ctx)
     installFooter(pi, ctx)
     queueUpdateInBackground(ctx)
   })
@@ -653,15 +704,21 @@ export default function (pi) {
         "Show current usage details",
         `Configure footer limit (${describeFooterConfig()})`,
         "Configure footer display mode",
+        "Reset footer settings to defaults",
       ])
 
       if (action === "Configure footer display mode") {
-        await configureDisplayMode(pi, ctx)
+        await configureDisplayMode(ctx)
+        return
+      }
+
+      if (action === "Reset footer settings to defaults") {
+        await resetFooterConfig(ctx)
         return
       }
 
       if (action?.startsWith("Configure footer limit")) {
-        await configureQuotaWindow(pi, ctx)
+        await configureQuotaWindow(ctx)
         return
       }
 
