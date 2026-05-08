@@ -10,6 +10,14 @@ Footer:
 
 ![Footer preview](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/footer-preview.png)
 
+Footer display variants:
+
+![All footer variants](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/all-footer-variants.png)
+
+Footer color thresholds:
+
+![Footer color thresholds](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/footer-color-thresholds.png)
+
 Detailed usage command:
 
 ![Command preview](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/command-preview.png)
