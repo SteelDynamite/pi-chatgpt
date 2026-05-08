@@ -5,7 +5,12 @@
  *   GET https://chatgpt.com/backend-api/wham/usage
  */
 
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui"
+import {
+  Key,
+  matchesKey,
+  truncateToWidth,
+  visibleWidth,
+} from "@mariozechner/pi-tui"
 
 const CHATGPT_BASE_URL = (
   process.env.CHATGPT_BASE_URL || "https://chatgpt.com/backend-api"
@@ -492,18 +497,97 @@ function buildUsageDetails(snapshot, provider) {
   return lines
 }
 
+async function selectFooterConfigOption(
+  ctx,
+  title,
+  options,
+  currentValue,
+  preview,
+) {
+  const initialIndex = Math.max(
+    0,
+    options.findIndex((option) => option.value === currentValue),
+  )
+  const originalConfig = { ...footerConfig }
+
+  const selected = await ctx.ui.custom((tui, theme, _keybindings, done) => {
+    let selectedIndex = initialIndex
+
+    function applyPreview() {
+      preview(options[selectedIndex].value)
+      requestRender()
+    }
+
+    applyPreview()
+
+    return {
+      invalidate() {},
+      handleInput(data) {
+        if (matchesKey(data, Key.up)) {
+          selectedIndex = Math.max(0, selectedIndex - 1)
+          applyPreview()
+          tui.requestRender()
+          return
+        }
+        if (matchesKey(data, Key.down)) {
+          selectedIndex = Math.min(options.length - 1, selectedIndex + 1)
+          applyPreview()
+          tui.requestRender()
+          return
+        }
+        if (matchesKey(data, Key.enter)) {
+          done(options[selectedIndex])
+          return
+        }
+        if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
+          done(undefined)
+        }
+      },
+      render(width) {
+        const lines = [
+          theme.fg("accent", theme.bold(title)),
+          theme.fg("dim", "↑↓ preview in footer • enter save • esc cancel"),
+          "",
+        ]
+
+        for (let index = 0; index < options.length; index++) {
+          const option = options[index]
+          const isSelected = index === selectedIndex
+          const isCurrent = option.value === currentValue
+          const prefix = isSelected ? "› " : "  "
+          const suffix = isCurrent ? "  current" : ""
+          const text = `${prefix}${option.label}${suffix}`
+          lines.push(
+            truncateToWidth(
+              isSelected ? theme.fg("accent", text) : text,
+              width,
+              "…",
+            ),
+          )
+        }
+
+        return lines.map((line) => truncateToWidth(line, width, "…"))
+      },
+    }
+  })
+
+  if (!selected) {
+    footerConfig = originalConfig
+    requestRender()
+  }
+
+  return selected
+}
+
 async function configureQuotaWindow(pi, ctx) {
-  const labels = QUOTA_WINDOW_OPTIONS.map((option) =>
-    option.value === footerConfig.quotaWindow
-      ? `✓ ${option.label}`
-      : option.label,
-  )
-  const choice = await ctx.ui.select(
+  const selected = await selectFooterConfigOption(
+    ctx,
     "Display which ChatGPT limit in footer?",
-    labels,
-  )
-  const selected = QUOTA_WINDOW_OPTIONS.find((option) =>
-    choice?.endsWith(option.label),
+    QUOTA_WINDOW_OPTIONS,
+    footerConfig.quotaWindow,
+    (quotaWindow) => {
+      footerConfig = normalizeFooterConfig({ ...footerConfig, quotaWindow })
+    },
   )
   if (!selected) return
 
@@ -512,17 +596,14 @@ async function configureQuotaWindow(pi, ctx) {
 }
 
 async function configureDisplayMode(pi, ctx) {
-  const labels = DISPLAY_MODE_OPTIONS.map((option) =>
-    option.value === footerConfig.displayMode
-      ? `✓ ${option.label}`
-      : option.label,
-  )
-  const choice = await ctx.ui.select(
+  const selected = await selectFooterConfigOption(
+    ctx,
     "How should the footer value be shown?",
-    labels,
-  )
-  const selected = DISPLAY_MODE_OPTIONS.find((option) =>
-    choice?.endsWith(option.label),
+    DISPLAY_MODE_OPTIONS,
+    footerConfig.displayMode,
+    (displayMode) => {
+      footerConfig = normalizeFooterConfig({ ...footerConfig, displayMode })
+    },
   )
   if (!selected) return
 
