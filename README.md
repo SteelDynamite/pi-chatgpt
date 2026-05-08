@@ -14,10 +14,6 @@ Footer display variants and color thresholds:
 
 ![Footer display variants and color thresholds](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/footer-variants-readable.png)
 
-Detailed usage command:
-
-![Command preview](https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/command-preview.png)
-
 ## Install
 
 ```sh
