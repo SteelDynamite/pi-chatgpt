@@ -36,7 +36,11 @@ const QUOTA_WINDOW_OPTIONS = [
 const DISPLAY_MODE_OPTIONS = [
   { label: "Used percent, e.g. W 42%", value: "used" },
   { label: "Remaining percent, e.g. W 58% left", value: "remaining" },
-  { label: "Compact with reset, e.g. W 42% · ~2d", value: "compact" },
+  {
+    label: "Remaining percent with reset, e.g. W 58% left · ~2d",
+    value: "remainingCompact",
+  },
+  { label: "Used percent with reset, e.g. W 42% · ~2d", value: "compact" },
 ]
 
 let usageSnapshot
@@ -239,6 +243,10 @@ function formatFooterUsagePart(label, window) {
 
   if (footerConfig.displayMode === "remaining") {
     return `${label} ${formatRemainingPercent(window)} left`
+  }
+
+  if (footerConfig.displayMode === "remainingCompact") {
+    return `${label} ${formatRemainingPercent(window)} left · ${formatResetShort(window.resetAt)}`
   }
 
   const used = formatUsedPercent(window)
