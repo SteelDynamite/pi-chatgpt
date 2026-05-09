@@ -186,6 +186,8 @@ async function runRealPiTui({
       PI_CODING_AGENT_SESSION_DIR: sessionDir,
       TERM: "xterm-256color",
       NO_COLOR: "0",
+      COLUMNS: "160",
+      LINES: "40",
       ...extraEnv,
     },
   })
