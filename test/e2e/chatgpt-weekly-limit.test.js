@@ -484,9 +484,38 @@ test("real pi TUI previews and saves footer display configuration options", asyn
       expectedConfig: { quotaWindow: "weekly", displayMode: "compact" },
     },
     {
-      name: "remaining percent",
+      name: "pace percent with state",
       mainKeys: displayModeMenu,
       optionKeys: `${down}${down}${enter}`,
+      submenuText: "How should the footer value be shown?",
+      expectText:
+        "ChatGPT footer mode: Pace percent with state, e.g. WP 13% (reserve)",
+      expectedConfig: { quotaWindow: "weekly", displayMode: "pace" },
+    },
+    {
+      name: "pace percent",
+      mainKeys: displayModeMenu,
+      optionKeys: `${down}${down}${down}${enter}`,
+      submenuText: "How should the footer value be shown?",
+      expectText: "ChatGPT footer mode: Pace percent, e.g. WP -13%",
+      expectedConfig: { quotaWindow: "weekly", displayMode: "paceCompact" },
+    },
+    {
+      name: "pace percent with reset",
+      mainKeys: displayModeMenu,
+      optionKeys: `${down}${down}${down}${down}${enter}`,
+      submenuText: "How should the footer value be shown?",
+      expectText:
+        "ChatGPT footer mode: Pace percent with reset, e.g. WP -13% · ~2d",
+      expectedConfig: {
+        quotaWindow: "weekly",
+        displayMode: "paceResetCompact",
+      },
+    },
+    {
+      name: "remaining percent",
+      mainKeys: displayModeMenu,
+      optionKeys: `${down}${down}${down}${down}${down}${enter}`,
       submenuText: "How should the footer value be shown?",
       expectText: "ChatGPT footer mode: Remaining percent, e.g. W 58% left",
       expectedConfig: { quotaWindow: "weekly", displayMode: "remaining" },
@@ -494,7 +523,7 @@ test("real pi TUI previews and saves footer display configuration options", asyn
     {
       name: "remaining percent with reset",
       mainKeys: displayModeMenu,
-      optionKeys: `${down}${down}${down}${enter}`,
+      optionKeys: `${down}${down}${down}${down}${down}${down}${enter}`,
       submenuText: "How should the footer value be shown?",
       expectText:
         "ChatGPT footer mode: Remaining percent with reset, e.g. W 58% left · ~2d",
