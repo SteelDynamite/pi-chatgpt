@@ -41,6 +41,12 @@ const QUOTA_WINDOW_OPTIONS = [
 const DISPLAY_MODE_OPTIONS = [
   { label: "Used percent, e.g. W 42%", value: "used" },
   { label: "Used percent with reset, e.g. W 42% · ~2d", value: "compact" },
+  { label: "Pace percent with state, e.g. WP 13% (reserve)", value: "pace" },
+  { label: "Pace percent, e.g. WP -13%", value: "paceCompact" },
+  {
+    label: "Pace percent with reset, e.g. WP -13% · ~2d",
+    value: "paceResetCompact",
+  },
   { label: "Remaining percent, e.g. W 58% left", value: "remaining" },
   {
     label: "Remaining percent with reset, e.g. W 58% left · ~2d",
@@ -198,6 +204,57 @@ function formatResetLong(resetAt) {
   return `in ${mins}m`
 }
 
+/* @param {{ usedPercent: number, windowSeconds: number, resetAt: number } | undefined} window
+ * @returns {number} Pace in percentage points (positive = deficit, negative = reserve, 0 = on pace); NaN if not calculable
+ */
+function calculatePacePercentValue(window) {
+  if (!window || !window.resetAt || !window.windowSeconds) return NaN
+
+  const nowSec = Date.now() / 1000
+  const resetAtSec = window.resetAt
+  const windowSec = window.windowSeconds
+
+  const windowStart = resetAtSec - windowSec
+  if (nowSec < windowStart) return NaN
+
+  const elapsedSec = Math.min(windowSec, nowSec - windowStart)
+  const elapsedPercent = (elapsedSec / windowSec) * 100
+
+  if (elapsedPercent < 0.1) return NaN
+
+  return window.usedPercent - elapsedPercent
+}
+
+/* @param {{ usedPercent: number, windowSeconds: number, resetAt: number } | undefined} window */
+function formatPacePercent(window) {
+  const pace = calculatePacePercentValue(window)
+
+  if (isNaN(pace)) {
+    if (!window || !window.resetAt || !window.windowSeconds) return "?%"
+
+    const nowSec = Date.now() / 1000
+    const windowStart = window.resetAt - window.windowSeconds
+    if (nowSec < windowStart) return "?% (not started)"
+
+    return "?% (starting)"
+  }
+
+  if (Math.abs(pace) < 0.1) return "0% (on pace)"
+
+  const roundedPace = Math.round(Math.abs(pace))
+  return pace > 0 ? `${roundedPace}% (deficit)` : `${roundedPace}% (reserve)`
+}
+
+/* @param {{ usedPercent: number, windowSeconds: number, resetAt: number } | undefined} window */
+function formatPacePercentShort(window) {
+  const pace = calculatePacePercentValue(window)
+
+  if (isNaN(pace)) return "?%"
+  if (pace > 0) return `+${Math.round(pace)}%`
+  if (pace < 0) return `${Math.round(pace)}%`
+  return "=0%"
+}
+
 function normalizeFooterConfig(value) {
   const record = asRecord(value)
   const rawQuotaWindow = record?.quotaWindow
@@ -292,16 +349,26 @@ function formatFooterUsagePart(label, window, theme) {
   if (!window) return undefined
 
   let text
-  if (footerConfig.displayMode === "remaining") {
-    text = `${label} ${formatRemainingPercent(window)} left`
-  } else if (footerConfig.displayMode === "remainingCompact") {
-    text = `${label} ${formatRemainingPercent(window)} left · ${formatResetShort(window.resetAt)}`
+  if (label === "W" && footerConfig.displayMode.startsWith("pace")) {
+    if (footerConfig.displayMode === "pace") {
+      text = `WP ${formatPacePercent(window)}`
+    } else if (footerConfig.displayMode === "paceCompact") {
+      text = `WP ${formatPacePercentShort(window)}`
+    } else if (footerConfig.displayMode === "paceResetCompact") {
+      text = `WP ${formatPacePercentShort(window)} · ${formatResetShort(window.resetAt)}`
+    }
   } else {
-    const used = formatUsedPercent(window)
-    text =
-      footerConfig.displayMode === "compact"
-        ? `${label} ${used} · ${formatResetShort(window.resetAt)}`
-        : `${label} ${used}`
+    if (footerConfig.displayMode === "remaining") {
+      text = `${label} ${formatRemainingPercent(window)} left`
+    } else if (footerConfig.displayMode === "remainingCompact") {
+      text = `${label} ${formatRemainingPercent(window)} left · ${formatResetShort(window.resetAt)}`
+    } else {
+      const used = formatUsedPercent(window)
+      text =
+        footerConfig.displayMode === "compact"
+          ? `${label} ${used} · ${formatResetShort(window.resetAt)}`
+          : `${label} ${used}`
+    }
   }
 
   return theme.fg(getUsageColor(window), text)
@@ -523,6 +590,7 @@ function buildUsageDetails(snapshot, provider) {
   lines.push(
     `weekly: ${formatUsedPercent(snapshot?.weekly)} used, ${formatRemainingPercent(snapshot?.weekly)} left, resets ${formatResetLong(snapshot?.weekly?.resetAt)}`,
   )
+  lines.push(`pace: ${formatPacePercent(snapshot?.weekly)}`)
   if (snapshot?.fetchedAt)
     lines.push(`fetched: ${new Date(snapshot.fetchedAt).toLocaleString()}`)
   lines.push(`footer: ${describeFooterConfig()}`)
