@@ -28,6 +28,7 @@
     "url": "https://github.com/patlux/pi-chatgpt-limit/issues"
   },
   "files": [
+    "index.js",
     "extensions",
     "README.md",
     "LICENSE"
@@ -39,7 +40,7 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/chatgpt-weekly-limit.js"
+      "./index.js"
     ],
     "image": "https://github.com/patlux/pi-chatgpt-limit/releases/download/preview-assets/footer-preview.png"
   }
