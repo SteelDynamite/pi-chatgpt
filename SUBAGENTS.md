@@ -1,7 +1,6 @@
 ---
 description: Maintains the pi-chatgpt-limit ChatGPT Codex usage footer extension
 manifest: true
-model: gpt-5.3-codex-spark
 resumable: true
 ---
 
