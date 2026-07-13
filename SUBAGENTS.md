@@ -40,13 +40,13 @@ Package/release basics:
 
 Announce notable releases in:
 
-1. GitHub Releases at `https://github.com/patlux/pi-chatgpt-limit/releases` with concise notes, install/update command, and preview asset links.
+1. GitHub Releases at `https://github.com/SteelDynamite/pi-chatgpt/releases` with concise notes, install/update command, and preview asset links.
 2. The existing r/PiCodingAgent thread: `https://www.reddit.com/r/PiCodingAgent/comments/1t17kz8/i_made_a_pi_extension_that_shows_chatgpt_codex/`.
 
 Keep Reddit updates short: version, key changes, release notes link, and:
 
 ```sh
-pi install pi-chatgpt
+pi install https://github.com/SteelDynamite/pi-chatgpt.git
 ```
 
 If attaching Reddit screenshots, use Chrome MCP. If Reddit cannot attach an image to an existing comment, reply to the update comment with the image.

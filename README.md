@@ -15,7 +15,7 @@ Footer display variants and color thresholds:
 ## Install
 
 ```sh
-pi install pi-chatgpt
+pi install https://github.com/SteelDynamite/pi-chatgpt.git
 ```
 
 Then reload pi:

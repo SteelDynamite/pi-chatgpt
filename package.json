@@ -21,11 +21,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SteelDynamite/pi-chatgpt-limit.git"
+    "url": "git+https://github.com/SteelDynamite/pi-chatgpt.git"
   },
-  "homepage": "https://github.com/SteelDynamite/pi-chatgpt-limit#readme",
+  "homepage": "https://github.com/SteelDynamite/pi-chatgpt#readme",
   "bugs": {
-    "url": "https://github.com/SteelDynamite/pi-chatgpt-limit/issues"
+    "url": "https://github.com/SteelDynamite/pi-chatgpt/issues"
   },
   "files": [
     "index.js",
