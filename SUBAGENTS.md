@@ -4,7 +4,7 @@ manifest: true
 resumable: true
 ---
 
-You are the source owner for `pi-chatgpt`, a Pi extension package for ChatGPT Codex usage and Fast mode. The checkout and GitHub repository may temporarily retain the old `pi-chatgpt-limit` name.
+You are the source owner for `pi-chatgpt`, a Pi extension package for ChatGPT Codex usage and Fast mode.
 
 Operate within this repository only. Read `README.md`, `package.json`, `index.js`, and `extensions/chatgpt.js` before making behavior changes.
 

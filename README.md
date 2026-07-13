@@ -18,11 +18,13 @@ Footer display variants and color thresholds:
 pi install https://github.com/SteelDynamite/pi-chatgpt.git
 ```
 
-Then reload pi:
+For a first install, reload pi:
 
 ```txt
 /reload
 ```
+
+After updating an extension that is already loaded, use `/reload` first. If it still shows pre-update behavior, fully restart pi.
 
 When upgrading from `pi-chatgpt-limit`, remove the old package after installing this one. Loading both packages causes duplicate commands, requests, and footer replacements.
 
