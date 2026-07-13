@@ -36,7 +36,13 @@ const WEEK_SECONDS = 7 * 24 * 60 * 60
 const LEGACY_CONFIG_ENTRY_TYPE = "chatgpt-limit-config"
 const CONFIG_FILE_NAME = "chatgpt.json"
 const LEGACY_CONFIG_FILE_NAME = "chatgpt-limit.json"
-const FAST_SUPPORTED_MODELS = new Set(["gpt-5.4", "gpt-5.5"])
+const FAST_SUPPORTED_MODELS = new Set([
+  "gpt-5.4",
+  "gpt-5.5",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+])
 
 const DEFAULT_FOOTER_CONFIG = {
   quotaWindow: "weekly",

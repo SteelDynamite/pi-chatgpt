@@ -541,27 +541,25 @@ test("normalizes config and formats percentages without a TUI", () => {
   assert.equal(__test__.formatUsedPercent({ usedPercent: 42.6 }), "43%")
   assert.equal(__test__.formatRemainingPercent({ usedPercent: 42.2 }), "58%")
   assert.equal(__test__.isOpenAICodexProvider("openai-codex-2"), true)
-  assert.equal(
-    __test__.isFastSupportedModel({
-      provider: "openai-codex",
-      id: "gpt-5.4",
-    }),
-    true,
-  )
-  assert.equal(
-    __test__.isFastSupportedModel({
-      provider: "openai-codex",
-      id: "gpt-5.5",
-    }),
-    true,
-  )
-  assert.equal(
-    __test__.isFastSupportedModel({
-      provider: "openai-codex",
-      id: "gpt-5.4-mini",
-    }),
-    false,
-  )
+  const fastModelIds = [
+    "gpt-5.4",
+    "gpt-5.5",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+  ]
+  for (const id of fastModelIds) {
+    assert.equal(
+      __test__.isFastSupportedModel({ provider: "openai-codex", id }),
+      true,
+    )
+  }
+  for (const id of ["gpt-5.4-mini", "gpt-5.6", "gpt-5.6-sun"]) {
+    assert.equal(
+      __test__.isFastSupportedModel({ provider: "openai-codex", id }),
+      false,
+    )
+  }
   assert.equal(
     __test__.isFastSupportedModel({ provider: "openai", id: "gpt-5.5" }),
     false,
@@ -595,10 +593,13 @@ test("normalizes config and formats percentages without a TUI", () => {
   }
   const theme = { fg: (_color, text) => text }
   const pi = { getThinkingLevel: () => "off" }
-  assert.match(
-    __test__.renderFooter(pi, ctx, footerData, theme, 120, true).join("\n"),
-    /gpt-5\.5 • Fast/,
-  )
+  for (const id of fastModelIds) {
+    ctx.model.id = id
+    assert.match(
+      __test__.renderFooter(pi, ctx, footerData, theme, 120, true).join("\n"),
+      new RegExp(`${id.replaceAll(".", "\\.")} • Fast`),
+    )
+  }
   ctx.model = {
     provider: "openai-codex",
     id: "gpt-5.4-mini",
@@ -694,6 +695,17 @@ test("Fast mode commands migrate config, patch supported payloads, and manage in
     assert.equal(
       handlers.get("before_provider_request")?.({ payload: {} }, ctx),
       undefined,
+    )
+
+    ctx.model = { provider: "openai-codex", id: "gpt-5.6-sol" }
+    handlers.get("model_select")?.({ model: ctx.model }, ctx)
+    assert.equal(process.env.PI_CHATGPT_FAST, "1")
+    assert.deepEqual(
+      handlers.get("before_provider_request")?.(
+        { payload: { model: "gpt-5.6-sol" } },
+        ctx,
+      ),
+      { model: "gpt-5.6-sol", service_tier: "priority" },
     )
 
     ctx.model = { provider: "openai-codex", id: "gpt-5.5" }

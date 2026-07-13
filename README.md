@@ -54,7 +54,7 @@ Examples:
 
 ## Fast mode
 
-Fast mode requests `service_tier: "priority"` only for the OpenAI-documented supported ChatGPT Codex models: GPT-5.4 and GPT-5.5.
+Fast mode requests `service_tier: "priority"` only for the OpenAI-documented supported ChatGPT Codex models: GPT-5.4, GPT-5.5, GPT-5.6 Sol (`gpt-5.6-sol`), GPT-5.6 Terra (`gpt-5.6-terra`), and GPT-5.6 Luna (`gpt-5.6-luna`).
 
 ```txt
 /fast temporary   Enable for this running session only
@@ -64,7 +64,7 @@ Fast mode requests `service_tier: "priority"` only for the OpenAI-documented sup
 
 Each command confirms the change. The footer shows `Fast` only when Fast mode is enabled and the active model supports it.
 
-Fast mode increases supported model speed and consumes ChatGPT credits faster. OpenAI currently documents 2× Standard consumption for GPT-5.4 and 2.5× for GPT-5.5.
+Fast mode increases supported model speed and consumes ChatGPT credits faster. OpenAI currently documents 2× Standard consumption for GPT-5.4 and 2.5× for GPT-5.5. For the GPT-5.6 models, OpenAI documents 1.5× speed and only “increased usage,” without an exact usage multiplier.
 
 The extension exports the current effective value as `PI_CHATGPT_FAST=1|0`, so newly launched subprocesses inherit it. The previous environment value is restored when the session shuts down. A temporary setting is not written to disk and is lost on reload, session replacement, or process exit.
 
