@@ -1,7 +1,7 @@
 {
-  "name": "pi-chatgpt-limit",
+  "name": "pi-chatgpt",
   "version": "0.3.0",
-  "description": "Show ChatGPT Codex subscription usage in pi's footer",
+  "description": "ChatGPT Codex usage and Fast mode support for pi",
   "type": "module",
   "scripts": {
     "test": "node --test test/e2e/*.test.js",
@@ -21,11 +21,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/patlux/pi-chatgpt-limit.git"
+    "url": "git+https://github.com/SteelDynamite/pi-chatgpt-limit.git"
   },
-  "homepage": "https://github.com/patlux/pi-chatgpt-limit#readme",
+  "homepage": "https://github.com/SteelDynamite/pi-chatgpt-limit#readme",
   "bugs": {
-    "url": "https://github.com/patlux/pi-chatgpt-limit/issues"
+    "url": "https://github.com/SteelDynamite/pi-chatgpt-limit/issues"
   },
   "files": [
     "index.js",

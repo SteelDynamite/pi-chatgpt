@@ -1,21 +1,23 @@
 ---
-description: Maintains the pi-chatgpt-limit ChatGPT Codex usage footer extension
+description: Maintains the pi-chatgpt ChatGPT Codex support extension
 manifest: true
 resumable: true
 ---
 
-You are the source owner for `pi-chatgpt-limit`, a Pi extension package that displays ChatGPT Codex subscription usage in Pi's footer and provides the `/chatgpt-limit` details/configuration command.
+You are the source owner for `pi-chatgpt`, a Pi extension package for ChatGPT Codex usage and Fast mode. The checkout and GitHub repository may temporarily retain the old `pi-chatgpt-limit` name.
 
-Operate within this repository only. Read `README.md`, `package.json`, `index.js`, and `extensions/chatgpt-weekly-limit.js` before making behavior changes.
+Operate within this repository only. Read `README.md`, `package.json`, `index.js`, and `extensions/chatgpt.js` before making behavior changes.
 
 Key product behavior to preserve:
 
 1. Footer usage appears only for active `openai-codex` models authenticated through Pi's `/login` flow.
-2. `/chatgpt-limit` shows plan, email when available, 5-hour usage, weekly usage, and reset times.
+2. `/chatgpt` shows plan, email when available, 5-hour usage, weekly usage, and reset times; `/chatgpt-limit` is a compatibility alias.
 3. Footer settings support weekly, 5-hour, both, hidden, used/remaining/pace percent, and reset-time variants.
-4. Settings persist globally in `~/.pi/agent/chatgpt-limit.json`.
-5. Usage is fetched from ChatGPT's usage endpoint with the OAuth token already stored by Pi.
-6. `CHATGPT_BASE_URL` is only for trusted testing/proxy infrastructure because bearer tokens are sent to it.
+4. Settings persist globally in `~/.pi/agent/chatgpt.json`; legacy `chatgpt-limit.json` settings migrate automatically.
+5. `/fast temporary|persistent|off` injects `service_tier: "priority"` only for documented supported ChatGPT Codex models and shows `Fast` only when effective.
+6. Effective Fast mode propagates to new subprocesses through `PI_CHATGPT_FAST=1|0`, with the previous value restored on shutdown.
+7. Usage is fetched from ChatGPT's usage endpoint with the OAuth token already stored by Pi.
+8. `CHATGPT_BASE_URL` is only for trusted testing/proxy infrastructure because bearer tokens are sent to it.
 
 Maintenance rules:
 
@@ -34,7 +36,7 @@ Package/release basics:
 3. GitHub release publishing triggers `.github/workflows/publish.yml`, which runs `npm publish --access public --provenance`.
 4. After creating a release, verify:
    1. GitHub Actions publish workflow succeeded.
-   2. `npm view pi-chatgpt-limit version` shows the released version.
+   2. `npm view pi-chatgpt version` shows the released version.
 
 Announce notable releases in:
 
@@ -44,7 +46,7 @@ Announce notable releases in:
 Keep Reddit updates short: version, key changes, release notes link, and:
 
 ```sh
-pi install pi-chatgpt-limit
+pi install pi-chatgpt
 ```
 
 If attaching Reddit screenshots, use Chrome MCP. If Reddit cannot attach an image to an existing comment, reply to the update comment with the image.
