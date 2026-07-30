@@ -54,7 +54,7 @@ Examples:
 - `W 58% left`
 - `5h 25% / W 42%`
 
-When `pi-token-speed` is also installed, its live TPS status appears at the top-right of the first footer row when space permits.
+Live statuses from other extensions appear alphabetically at the top-right of the first footer row. Long status groups truncate on narrow terminals while preserving the project and session display.
 
 ## Fast mode
 

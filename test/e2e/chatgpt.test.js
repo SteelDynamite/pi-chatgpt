@@ -612,7 +612,7 @@ test("normalizes config and formats percentages without a TUI", () => {
   )
 })
 
-test("renders live tokenSpeed status in the top-right footer without adding a row", () => {
+test("renders all live extension statuses in the top-right footer", () => {
   const ctx = {
     model: {
       provider: "openai-codex",
@@ -635,39 +635,54 @@ test("renders live tokenSpeed status in the top-right footer without adding a ro
   }
   const theme = { fg: (_color, text) => text }
   const pi = { getThinkingLevel: () => "high" }
-  const width = 96
+  const width = 120
   const withoutStatus = __test__.renderFooter(pi, ctx, footerData, theme, width)
-  const firstStatus =
-    "\x1b[2m⚡ TPS:\x1b[0m \x1b[38;2;0;255;0m42.0 tok/s\x1b[0m\u200b"
-
-  statuses.set("anotherExtension", "not shown")
-  assert.deepEqual(
-    __test__.renderFooter(pi, ctx, footerData, theme, width),
-    withoutStatus,
+  const withoutStatusNarrow = __test__.renderFooter(
+    pi,
+    ctx,
+    footerData,
+    theme,
+    32,
   )
+  const alphaStatus = "\x1b[36mAlpha ready\x1b[0m"
+  const zetaStatus = "\x1b[32mZeta online\x1b[0m"
 
-  statuses.set("tokenSpeed", firstStatus)
-  const withStatus = __test__.renderFooter(pi, ctx, footerData, theme, width)
-  assert.equal(withStatus.length, 2)
-  assert.equal(withStatus[1], withoutStatus[1])
+  statuses.set("zeta", "\x1b[32mZeta\n online\x1b[0m")
+  statuses.set("empty", " \r\n\t ")
+  statuses.set("alpha", "\x1b[36mAlpha\t ready\x1b[0m")
+  const withStatuses = __test__.renderFooter(pi, ctx, footerData, theme, width)
+  assert.equal(withStatuses.length, 2)
+  assert.equal(withStatuses[1], withoutStatus[1])
   assert.ok(
-    withStatus[0].startsWith(
+    withStatuses[0].startsWith(
       "/tmp/a-long-project-directory (main) • footer test",
     ),
   )
-  assert.equal(visibleWidth(withStatus[0]), width)
-  assert.ok(withStatus[0].endsWith(firstStatus))
+  assert.equal(visibleWidth(withStatuses[0]), width)
+  assert.ok(withStatuses[0].endsWith(`${alphaStatus} ${zetaStatus}`))
+  assert.doesNotMatch(stripAnsi(withStatuses[0]), /[\r\n\t]/)
 
-  const nextStatus = "\x1b[2m⚡ TPS:\x1b[0m 7.5 tok/s\u200b"
-  statuses.set("tokenSpeed", nextStatus)
-  const updated = __test__.renderFooter(pi, ctx, footerData, theme, 32)
-  assert.equal(updated.length, 2)
-  assert.ok(visibleWidth(updated[0]) <= 32)
-  assert.ok(updated[0].endsWith(nextStatus))
+  statuses.set("alpha", "\x1b[35mUpdated\x1b[0m")
+  const updated = __test__.renderFooter(pi, ctx, footerData, theme, width)
+  assert.ok(updated[0].endsWith(`\x1b[35mUpdated\x1b[0m ${zetaStatus}`))
+
+  const narrow = __test__.renderFooter(pi, ctx, footerData, theme, 32)
+  assert.equal(narrow.length, 2)
+  assert.equal(narrow[1], withoutStatusNarrow[1])
+  assert.equal(visibleWidth(narrow[0]), 32)
+  assert.ok(stripAnsi(narrow[0]).startsWith("/tmp/a-long-...  "))
+  assert.ok(stripAnsi(narrow[0]).endsWith("..."))
 
   const tooNarrow = __test__.renderFooter(pi, ctx, footerData, theme, 8)
   assert.equal(tooNarrow.length, 2)
   assert.ok(visibleWidth(tooNarrow[0]) <= 8)
+
+  statuses.clear()
+  statuses.set("empty", " \r\n\t ")
+  assert.deepEqual(
+    __test__.renderFooter(pi, ctx, footerData, theme, width),
+    withoutStatus,
+  )
 })
 
 test("detects TUI mode with context and process fallback", () => {

@@ -666,21 +666,38 @@ function renderFooter(pi, ctx, footerData, theme, width, fastEnabled = false) {
     typeof footerData.getExtensionStatuses === "function"
       ? footerData.getExtensionStatuses()
       : undefined
-  const rawTokenSpeedStatus = extensionStatuses?.get("tokenSpeed")
-  const tokenSpeedStatus =
-    typeof rawTokenSpeedStatus === "string"
-      ? rawTokenSpeedStatus
-          .replace(/[\r\n\t]/g, " ")
-          .replace(/ +/g, " ")
-          .trim()
-      : undefined
-  const tokenSpeedWidth = tokenSpeedStatus ? visibleWidth(tokenSpeedStatus) : 0
-  const availableForPwd = width - tokenSpeedWidth - 2
-  if (tokenSpeedWidth > 0 && availableForPwd > 0) {
-    pwdLine = truncateToWidth(dimPwd, availableForPwd, dimEllipsis)
-    pwdLine +=
-      " ".repeat(Math.max(2, width - visibleWidth(pwdLine) - tokenSpeedWidth)) +
-      tokenSpeedStatus
+  const statusGroup = Array.from(extensionStatuses?.entries() || [])
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, text]) =>
+      typeof text === "string"
+        ? text
+            .replace(/[\r\n\t]/g, " ")
+            .replace(/ +/g, " ")
+            .trim()
+        : "",
+    )
+    .filter((text) => visibleWidth(text) > 0)
+    .join(" ")
+
+  if (statusGroup && width > 2) {
+    const minPwdWidth = Math.min(
+      visibleWidth(dimPwd),
+      Math.max(1, Math.floor((width - 2) / 2)),
+    )
+    const maxStatusWidth = width - minPwdWidth - 2
+    const visibleStatusGroup = truncateToWidth(
+      statusGroup,
+      maxStatusWidth,
+      dimEllipsis,
+    )
+    const statusWidth = visibleWidth(visibleStatusGroup)
+    if (statusWidth > 0) {
+      const availableForPwd = width - statusWidth - 2
+      pwdLine = truncateToWidth(dimPwd, availableForPwd, dimEllipsis)
+      pwdLine +=
+        " ".repeat(Math.max(2, width - visibleWidth(pwdLine) - statusWidth)) +
+        visibleStatusGroup
+    }
   }
 
   const remainder = statsLine.slice(statsLeft.length)
