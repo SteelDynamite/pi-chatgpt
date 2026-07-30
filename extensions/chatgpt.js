@@ -659,11 +659,30 @@ function renderFooter(pi, ctx, footerData, theme, width, fastEnabled = false) {
     }
   }
 
-  const pwdLine = truncateToWidth(
-    theme.fg("dim", pwd),
-    width,
-    theme.fg("dim", "..."),
-  )
+  const dimPwd = theme.fg("dim", pwd)
+  const dimEllipsis = theme.fg("dim", "...")
+  let pwdLine = truncateToWidth(dimPwd, width, dimEllipsis)
+  const extensionStatuses =
+    typeof footerData.getExtensionStatuses === "function"
+      ? footerData.getExtensionStatuses()
+      : undefined
+  const rawTokenSpeedStatus = extensionStatuses?.get("tokenSpeed")
+  const tokenSpeedStatus =
+    typeof rawTokenSpeedStatus === "string"
+      ? rawTokenSpeedStatus
+          .replace(/[\r\n\t]/g, " ")
+          .replace(/ +/g, " ")
+          .trim()
+      : undefined
+  const tokenSpeedWidth = tokenSpeedStatus ? visibleWidth(tokenSpeedStatus) : 0
+  const availableForPwd = width - tokenSpeedWidth - 2
+  if (tokenSpeedWidth > 0 && availableForPwd > 0) {
+    pwdLine = truncateToWidth(dimPwd, availableForPwd, dimEllipsis)
+    pwdLine +=
+      " ".repeat(Math.max(2, width - visibleWidth(pwdLine) - tokenSpeedWidth)) +
+      tokenSpeedStatus
+  }
+
   const remainder = statsLine.slice(statsLeft.length)
   return [pwdLine, theme.fg("dim", statsLeft) + theme.fg("dim", remainder)]
 }

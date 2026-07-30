@@ -14,6 +14,7 @@ import http from "node:http"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { test } from "node:test"
+import { visibleWidth } from "@earendil-works/pi-tui"
 import extension, { __test__ } from "../../extensions/chatgpt.js"
 
 const EXTENSION_PATH = resolve("extensions/chatgpt.js")
@@ -609,6 +610,64 @@ test("normalizes config and formats percentages without a TUI", () => {
     __test__.renderFooter(pi, ctx, footerData, theme, 120, true).join("\n"),
     /Fast/,
   )
+})
+
+test("renders live tokenSpeed status in the top-right footer without adding a row", () => {
+  const ctx = {
+    model: {
+      provider: "openai-codex",
+      id: "gpt-5.6-sol",
+      contextWindow: 1000,
+    },
+    sessionManager: {
+      getEntries: () => [],
+      getCwd: () => "/tmp/a-long-project-directory",
+      getSessionName: () => "footer test",
+    },
+    modelRegistry: { isUsingOAuth: () => true },
+    getContextUsage: () => ({ contextWindow: 1000, percent: 10 }),
+  }
+  const statuses = new Map()
+  const footerData = {
+    getGitBranch: () => "main",
+    getAvailableProviderCount: () => 1,
+    getExtensionStatuses: () => statuses,
+  }
+  const theme = { fg: (_color, text) => text }
+  const pi = { getThinkingLevel: () => "high" }
+  const width = 96
+  const withoutStatus = __test__.renderFooter(pi, ctx, footerData, theme, width)
+  const firstStatus =
+    "\x1b[2m⚡ TPS:\x1b[0m \x1b[38;2;0;255;0m42.0 tok/s\x1b[0m\u200b"
+
+  statuses.set("anotherExtension", "not shown")
+  assert.deepEqual(
+    __test__.renderFooter(pi, ctx, footerData, theme, width),
+    withoutStatus,
+  )
+
+  statuses.set("tokenSpeed", firstStatus)
+  const withStatus = __test__.renderFooter(pi, ctx, footerData, theme, width)
+  assert.equal(withStatus.length, 2)
+  assert.equal(withStatus[1], withoutStatus[1])
+  assert.ok(
+    withStatus[0].startsWith(
+      "/tmp/a-long-project-directory (main) • footer test",
+    ),
+  )
+  assert.equal(visibleWidth(withStatus[0]), width)
+  assert.ok(withStatus[0].endsWith(firstStatus))
+
+  const nextStatus = "\x1b[2m⚡ TPS:\x1b[0m 7.5 tok/s\u200b"
+  statuses.set("tokenSpeed", nextStatus)
+  const updated = __test__.renderFooter(pi, ctx, footerData, theme, 32)
+  assert.equal(updated.length, 2)
+  assert.ok(visibleWidth(updated[0]) <= 32)
+  assert.ok(updated[0].endsWith(nextStatus))
+
+  const tooNarrow = __test__.renderFooter(pi, ctx, footerData, theme, 8)
+  assert.equal(tooNarrow.length, 2)
+  assert.ok(visibleWidth(tooNarrow[0]) <= 8)
 })
 
 test("detects TUI mode with context and process fallback", () => {

@@ -54,6 +54,8 @@ Examples:
 - `W 58% left`
 - `5h 25% / W 42%`
 
+When `pi-token-speed` is also installed, its live TPS status appears at the top-right of the first footer row when space permits.
+
 ## Fast mode
 
 Fast mode requests `service_tier: "priority"` only for the OpenAI-documented supported ChatGPT Codex models: GPT-5.4, GPT-5.5, GPT-5.6 Sol (`gpt-5.6-sol`), GPT-5.6 Terra (`gpt-5.6-terra`), and GPT-5.6 Luna (`gpt-5.6-luna`).

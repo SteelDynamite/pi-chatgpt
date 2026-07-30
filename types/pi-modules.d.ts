@@ -34,6 +34,7 @@ interface PiTheme {
 interface PiFooterData {
   getGitBranch(): string | undefined
   getAvailableProviderCount(): number
+  getExtensionStatuses(): ReadonlyMap<string, string>
   onBranchChange(callback: () => void): (() => void) | undefined
 }
 
