@@ -1,5 +1,5 @@
 ---
-description: Maintains the pi-chatgpt ChatGPT Codex support extension
+description: Owns OAuth-backed ChatGPT Codex quota fetching, `/chatgpt` footer and settings flows, and supported-model `/fast` service-tier injection with subprocess propagation; excludes non-Codex providers and untrusted endpoints.
 manifest: true
 resumable: true
 ---
