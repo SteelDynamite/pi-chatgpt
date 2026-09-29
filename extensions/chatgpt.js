@@ -1,5 +1,5 @@
 /**
- * Add ChatGPT Codex usage and Fast mode support to pi.
+ * Add ChatGPT Codex usage and speed mode support to pi.
  *
  * Uses ChatGPT's usage endpoint:
  *   GET https://chatgpt.com/backend-api/wham/usage
@@ -20,6 +20,7 @@ const DEFAULT_CHATGPT_BASE_URL = "https://chatgpt.com/backend-api"
 const TRUST_CUSTOM_BASE_URL_ENV = "CHATGPT_TRUST_CUSTOM_BASE_URL"
 const LEGACY_TRUST_CUSTOM_BASE_URL_ENV = "CHATGPT_LIMIT_TRUST_CUSTOM_BASE_URL"
 const FAST_ENV = "PI_CHATGPT_FAST"
+const SPEED_ENV = "PI_CHATGPT_SPEED"
 const ALLOWED_CHATGPT_ORIGINS = new Set(["https://chatgpt.com"])
 const CHATGPT_BASE_URL_RESULT = resolveChatGptBaseUrl(
   process.env.CHATGPT_BASE_URL,
@@ -36,6 +37,15 @@ const WEEK_SECONDS = 7 * 24 * 60 * 60
 const LEGACY_CONFIG_ENTRY_TYPE = "chatgpt-limit-config"
 const CONFIG_FILE_NAME = "chatgpt.json"
 const LEGACY_CONFIG_FILE_NAME = "chatgpt-limit.json"
+const STANDARD_MODE = "standard"
+const FAST_MODE = "fast"
+const ULTRAFAST_MODE = "ultrafast"
+const SPEED_MODES = new Set([STANDARD_MODE, FAST_MODE, ULTRAFAST_MODE])
+const SPEED_MODE_LABELS = {
+  [STANDARD_MODE]: "Standard",
+  [FAST_MODE]: "Fast",
+  [ULTRAFAST_MODE]: "Ultrafast",
+}
 const FAST_SUPPORTED_MODELS = new Set([
   "gpt-5.4",
   "gpt-5.5",
@@ -43,6 +53,7 @@ const FAST_SUPPORTED_MODELS = new Set([
   "gpt-5.6-terra",
   "gpt-5.6-luna",
 ])
+const ULTRAFAST_SUPPORTED_MODELS = new Set(["gpt-6-astra"])
 
 const DEFAULT_FOOTER_CONFIG = {
   quotaWindow: "weekly",
@@ -75,7 +86,7 @@ const DISPLAY_MODE_OPTIONS = [
 
 let usageSnapshot
 let footerConfig = { ...DEFAULT_FOOTER_CONFIG }
-let persistentFastEnabled = false
+let persistentSpeedMode = STANDARD_MODE
 let refreshTimer
 let requestRender = () => {}
 
@@ -145,10 +156,41 @@ function isFastSupportedModel(model) {
   )
 }
 
+/** @param {{ provider?: string, id?: string } | undefined} model */
+function isUltrafastSupportedModel(model) {
+  return (
+    isOpenAICodexProvider(model?.provider) &&
+    ULTRAFAST_SUPPORTED_MODELS.has(model?.id || "")
+  )
+}
+
+/**
+ * @param {{ provider?: string, id?: string } | undefined} model
+ * @param {string} speedMode
+ */
+function isSpeedModeSupported(model, speedMode) {
+  if (speedMode === STANDARD_MODE) return true
+  if (speedMode === FAST_MODE) return isFastSupportedModel(model)
+  if (speedMode === ULTRAFAST_MODE) return isUltrafastSupportedModel(model)
+  return false
+}
+
+/**
+ * @param {unknown} payload
+ * @param {string} speedMode
+ */
+function addSpeedServiceTier(payload, speedMode) {
+  const record = asRecord(payload)
+  if (!record) return undefined
+  if (speedMode === FAST_MODE) return { ...record, service_tier: "priority" }
+  if (speedMode === ULTRAFAST_MODE)
+    return { ...record, service_tier: "ultrafast" }
+  return record
+}
+
 /** @param {unknown} payload */
 function addFastServiceTier(payload) {
-  const record = asRecord(payload)
-  return record ? { ...record, service_tier: "priority" } : undefined
+  return addSpeedServiceTier(payload, FAST_MODE)
 }
 
 /** @param {string | undefined} value */
@@ -156,6 +198,12 @@ function parseFastEnv(value) {
   if (value === "1") return true
   if (value === "0") return false
   return undefined
+}
+
+/** @param {string | undefined} value */
+function parseSpeedEnv(value) {
+  const speedMode = value?.toLowerCase()
+  return SPEED_MODES.has(speedMode) ? speedMode : undefined
 }
 
 /** @param {number} count */
@@ -368,9 +416,14 @@ function normalizeFooterConfig(value) {
 
 function normalizeGlobalConfig(value) {
   const record = asRecord(value)
+  const speedMode =
+    parseSpeedEnv(
+      typeof record?.speedMode === "string" ? record.speedMode : undefined,
+    ) ?? (record?.fastMode === true ? FAST_MODE : STANDARD_MODE)
   return {
     ...normalizeFooterConfig(record),
-    fastMode: typeof record?.fastMode === "boolean" ? record.fastMode : false,
+    fastMode: speedMode !== STANDARD_MODE,
+    speedMode,
   }
 }
 
@@ -393,7 +446,11 @@ async function readGlobalConfig(fileName) {
 async function writeGlobalConfig() {
   const configPath = getConfigPath()
   const tempPath = `${configPath}.${process.pid}.tmp`
-  const config = { ...footerConfig, fastMode: persistentFastEnabled }
+  const config = {
+    ...footerConfig,
+    fastMode: persistentSpeedMode !== STANDARD_MODE,
+    speedMode: persistentSpeedMode,
+  }
   await mkdir(dirname(configPath), { recursive: true })
   await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`)
   await rename(tempPath, configPath)
@@ -405,7 +462,7 @@ async function restoreGlobalConfig(ctx) {
     config = await readGlobalConfig(LEGACY_CONFIG_FILE_NAME)
     if (config) {
       footerConfig = normalizeFooterConfig(config)
-      persistentFastEnabled = config.fastMode
+      persistentSpeedMode = config.speedMode
       await writeGlobalConfig()
       return
     }
@@ -413,12 +470,12 @@ async function restoreGlobalConfig(ctx) {
 
   if (config) {
     footerConfig = normalizeFooterConfig(config)
-    persistentFastEnabled = config.fastMode
+    persistentSpeedMode = config.speedMode
     return
   }
 
   footerConfig = restoreLegacySessionFooterConfig(ctx)
-  persistentFastEnabled = false
+  persistentSpeedMode = STANDARD_MODE
 }
 
 function restoreLegacySessionFooterConfig(ctx) {
@@ -549,7 +606,15 @@ function formatFooterUsage(theme) {
   return parts.length > 0 ? parts.join(theme.fg("dim", " / ")) : undefined
 }
 
-function renderFooter(pi, ctx, footerData, theme, width, fastEnabled = false) {
+/** @param {string} speedMode */
+function renderFooter(
+  pi,
+  ctx,
+  footerData,
+  theme,
+  width,
+  speedMode = STANDARD_MODE,
+) {
   const model = ctx.model
 
   const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }
@@ -618,8 +683,8 @@ function renderFooter(pi, ctx, footerData, theme, width, fastEnabled = false) {
         : `${modelName} • ${thinkingLevel}`
   }
 
-  if (fastEnabled && isFastSupportedModel(model)) {
-    rightSideWithoutProvider += " • Fast"
+  if (speedMode !== STANDARD_MODE && isSpeedModeSupported(model, speedMode)) {
+    rightSideWithoutProvider += ` • ${SPEED_MODE_LABELS[speedMode]}`
   }
 
   if (isOpenAICodexProvider(model?.provider)) {
@@ -705,7 +770,7 @@ function renderFooter(pi, ctx, footerData, theme, width, fastEnabled = false) {
 }
 
 /** @param {PiExtensionContext} ctx */
-function installFooter(pi, ctx, isFastEnabled) {
+function installFooter(pi, ctx, getSpeedMode) {
   ctx.ui.setFooter((tui, theme, footerData) => {
     requestRender = () => tui.requestRender()
     const unsub = footerData.onBranchChange(() => tui.requestRender())
@@ -715,7 +780,7 @@ function installFooter(pi, ctx, isFastEnabled) {
       },
       invalidate() {},
       render(width) {
-        return renderFooter(pi, ctx, footerData, theme, width, isFastEnabled())
+        return renderFooter(pi, ctx, footerData, theme, width, getSpeedMode())
       },
     }
   })
@@ -971,12 +1036,16 @@ export const __test__ = {
   formatResetShort,
   formatUsedPercent,
   addFastServiceTier,
+  addSpeedServiceTier,
   getTokenMetadata,
   isFastSupportedModel,
+  isSpeedModeSupported,
+  isUltrafastSupportedModel,
   isOpenAICodexProvider,
   normalizeFooterConfig,
   normalizeGlobalConfig,
   parseFastEnv,
+  parseSpeedEnv,
   inferProcessMode,
   isTuiContext,
   parseUsageSnapshot,
@@ -987,9 +1056,11 @@ export const __test__ = {
 export default function (pi) {
   /** @type {Promise<unknown>} */
   let inFlight = Promise.resolve()
-  let fastEnabled = false
+  let speedMode = STANDARD_MODE
   const inheritedFastEnv = process.env[FAST_ENV]
+  const inheritedSpeedEnv = process.env[SPEED_ENV]
   let ownedFastEnvValue
+  let ownedSpeedEnvValue
 
   function queueUpdate(ctx) {
     inFlight = inFlight.catch(() => undefined).then(() => updateUsage(ctx))
@@ -1005,24 +1076,36 @@ export default function (pi) {
     queueUpdateInBackground(ctx)
   }
 
-  function updateFastEnvironment(model) {
-    const value = fastEnabled && isFastSupportedModel(model) ? "1" : "0"
-    process.env[FAST_ENV] = value
-    ownedFastEnvValue = value
+  function updateSpeedEnvironment(model) {
+    const fastValue =
+      speedMode !== STANDARD_MODE && isSpeedModeSupported(model, speedMode)
+        ? "1"
+        : "0"
+    process.env[FAST_ENV] = fastValue
+    process.env[SPEED_ENV] = speedMode
+    ownedFastEnvValue = fastValue
+    ownedSpeedEnvValue = speedMode
     requestRender()
   }
 
-  function restoreFastEnvironment() {
+  function restoreSpeedEnvironment() {
     if (
-      ownedFastEnvValue === undefined ||
-      process.env[FAST_ENV] !== ownedFastEnvValue
+      ownedFastEnvValue !== undefined &&
+      process.env[FAST_ENV] === ownedFastEnvValue
     ) {
-      return
+      if (inheritedFastEnv === undefined) delete process.env[FAST_ENV]
+      else process.env[FAST_ENV] = inheritedFastEnv
+      ownedFastEnvValue = undefined
     }
 
-    if (inheritedFastEnv === undefined) delete process.env[FAST_ENV]
-    else process.env[FAST_ENV] = inheritedFastEnv
-    ownedFastEnvValue = undefined
+    if (
+      ownedSpeedEnvValue !== undefined &&
+      process.env[SPEED_ENV] === ownedSpeedEnvValue
+    ) {
+      if (inheritedSpeedEnv === undefined) delete process.env[SPEED_ENV]
+      else process.env[SPEED_ENV] = inheritedSpeedEnv
+      ownedSpeedEnvValue = undefined
+    }
   }
 
   async function handleChatGptCommand(_args, ctx) {
@@ -1072,59 +1155,141 @@ export default function (pi) {
 
   pi.on("session_start", async (_event, ctx) => {
     await restoreGlobalConfig(ctx)
-    fastEnabled = parseFastEnv(inheritedFastEnv) ?? persistentFastEnabled
-    updateFastEnvironment(ctx.model)
+    const inheritedSpeedMode = parseSpeedEnv(inheritedSpeedEnv)
+    const inheritedFastEnabled = parseFastEnv(inheritedFastEnv)
+    speedMode =
+      inheritedSpeedMode ??
+      (inheritedFastEnabled === undefined
+        ? persistentSpeedMode
+        : inheritedFastEnabled
+          ? FAST_MODE
+          : STANDARD_MODE)
+    updateSpeedEnvironment(ctx.model)
     if (!isTuiContext(ctx)) return
 
-    installFooter(pi, ctx, () => fastEnabled)
+    installFooter(pi, ctx, () => speedMode)
     queueUpdateInBackground(ctx)
   })
 
   pi.on("model_select", (event, ctx) => {
-    updateFastEnvironment(event.model || ctx.model)
+    updateSpeedEnvironment(event.model || ctx.model)
     queueAutomaticUpdateInBackground(ctx)
   })
   pi.on("agent_end", (_event, ctx) => queueAutomaticUpdateInBackground(ctx))
 
   pi.on("before_provider_request", (event, ctx) => {
-    if (!fastEnabled || !isFastSupportedModel(ctx.model)) return undefined
-    return addFastServiceTier(event.payload)
+    if (
+      speedMode === STANDARD_MODE ||
+      !isSpeedModeSupported(ctx.model, speedMode)
+    )
+      return undefined
+    return addSpeedServiceTier(event.payload, speedMode)
   })
 
   pi.on("session_shutdown", async () => {
     if (refreshTimer) clearInterval(refreshTimer)
     refreshTimer = undefined
     requestRender = () => {}
-    restoreFastEnvironment()
+    restoreSpeedEnvironment()
   })
 
   pi.registerCommand("fast", {
-    description: "Set ChatGPT Codex Fast mode: temporary, persistent, or off",
+    description:
+      "Set ChatGPT Codex speed: temporary|persistent [standard|fast|ultrafast]",
     getArgumentCompletions: (prefix) =>
-      ["temporary", "persistent", "off"]
+      [
+        "temporary",
+        "temporary standard",
+        "temporary fast",
+        "temporary ultrafast",
+        "persistent",
+        "persistent standard",
+        "persistent fast",
+        "persistent ultrafast",
+        "status",
+        "off",
+      ]
         .filter((value) => value.startsWith(prefix.trim().toLowerCase()))
         .map((value) => ({ value, label: value })),
     handler: async (args, ctx) => {
-      const mode = String(args).trim().toLowerCase()
-      if (!new Set(["temporary", "persistent", "off"]).has(mode)) {
-        ctx.ui.notify("Usage: /fast temporary|persistent|off", "warning")
+      const tokens = String(args)
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+      if (tokens.length === 1 && tokens[0] === "status") {
+        const label = SPEED_MODE_LABELS[speedMode]
+        const modelName = ctx.model
+          ? `${ctx.model.provider}/${ctx.model.id}`
+          : "the current model"
+        const state =
+          speedMode === STANDARD_MODE
+            ? "active"
+            : isSpeedModeSupported(ctx.model, speedMode)
+              ? "active"
+              : `selected; unsupported by ${modelName}`
+        ctx.ui.notify(
+          `ChatGPT speed: ${label} (${state}).`,
+          state === "active" ? "info" : "warning",
+        )
         return
       }
 
-      fastEnabled = mode !== "off"
-      if (mode !== "temporary") {
-        persistentFastEnabled = mode === "persistent"
-        await writeGlobalConfig()
+      const isOff = tokens.length === 1 && tokens[0] === "off"
+      const scope = isOff ? "persistent" : tokens[0]
+      const selectedSpeedMode = isOff
+        ? STANDARD_MODE
+        : tokens.length === 1
+          ? FAST_MODE
+          : tokens[1]
+      if (
+        (scope !== "temporary" && scope !== "persistent") ||
+        !SPEED_MODES.has(selectedSpeedMode) ||
+        tokens.length > 2
+      ) {
+        ctx.ui.notify(
+          "Usage: /fast temporary|persistent [standard|fast|ultrafast] | off | status",
+          "warning",
+        )
+        return
       }
-      updateFastEnvironment(ctx.model)
 
-      const message =
-        mode === "temporary"
-          ? "Fast mode enabled temporarily."
-          : mode === "persistent"
-            ? "Fast mode enabled persistently."
-            : "Fast mode disabled."
-      ctx.ui.notify(message, "info")
+      if (scope === "persistent") {
+        const previousPersistentSpeedMode = persistentSpeedMode
+        persistentSpeedMode = selectedSpeedMode
+        try {
+          await writeGlobalConfig()
+        } catch (error) {
+          persistentSpeedMode = previousPersistentSpeedMode
+          throw error
+        }
+      }
+      speedMode = selectedSpeedMode
+      updateSpeedEnvironment(ctx.model)
+
+      let message = isOff
+        ? "Fast mode disabled."
+        : speedMode === FAST_MODE
+          ? `Fast mode enabled ${scope === "temporary" ? "temporarily" : "persistently"}.`
+          : `${SPEED_MODE_LABELS[speedMode]} mode selected ${scope === "temporary" ? "temporarily" : "persistently"}.`
+      if (
+        speedMode !== STANDARD_MODE &&
+        !isSpeedModeSupported(ctx.model, speedMode)
+      ) {
+        const modelName = ctx.model
+          ? `${ctx.model.provider}/${ctx.model.id}`
+          : "the current model"
+        message += ` Not active: ${modelName} does not support ${SPEED_MODE_LABELS[speedMode]} mode.`
+        if (speedMode === ULTRAFAST_MODE)
+          message += " Ultrafast currently supports gpt-6-astra only."
+      }
+      ctx.ui.notify(
+        message,
+        speedMode !== STANDARD_MODE &&
+          !isSpeedModeSupported(ctx.model, speedMode)
+          ? "warning"
+          : "info",
+      )
     },
   })
 

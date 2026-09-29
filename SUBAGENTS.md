@@ -1,10 +1,10 @@
 ---
-description: Owns OAuth-backed ChatGPT Codex quota fetching, `/chatgpt` footer and settings flows, and supported-model `/fast` service-tier injection with subprocess propagation; excludes non-Codex providers and untrusted endpoints.
+description: Owns OAuth-backed ChatGPT Codex quota fetching, `/chatgpt` footer and settings flows, and supported-model `/fast` Standard/Fast/Ultrafast selection with subprocess propagation; excludes non-Codex providers and untrusted endpoints.
 manifest: true
 resumable: true
 ---
 
-You are the source owner for `pi-chatgpt`, a Pi extension package for ChatGPT Codex usage and Fast mode.
+You are the source owner for `pi-chatgpt`, a Pi extension package for ChatGPT Codex usage and speed modes.
 
 Operate within this repository only. Read `README.md`, `package.json`, `index.js`, and `extensions/chatgpt.js` before making behavior changes.
 
@@ -14,10 +14,12 @@ Key product behavior to preserve:
 2. `/chatgpt` shows plan, email when available, 5-hour usage, weekly usage, and reset times; `/chatgpt-limit` is a compatibility alias.
 3. Footer settings support weekly, 5-hour, both, hidden, used/remaining/pace percent, and reset-time variants.
 4. Settings persist globally in `~/.pi/agent/chatgpt.json`; legacy `chatgpt-limit.json` settings migrate automatically.
-5. `/fast temporary|persistent|off` injects `service_tier: "priority"` only for documented supported ChatGPT Codex models and shows `Fast` only when effective.
-6. Effective Fast mode propagates to new subprocesses through `PI_CHATGPT_FAST=1|0`, with the previous value restored on shutdown.
-7. Usage is fetched from ChatGPT's usage endpoint with the OAuth token already stored by Pi.
-8. `CHATGPT_BASE_URL` is only for trusted testing/proxy infrastructure because bearer tokens are sent to it.
+5. `/fast temporary|persistent [standard|fast|ultrafast]`, `/fast off`, and `/fast status` preserve legacy Fast commands; Fast injects `service_tier: "priority"` for its supported Codex models, while Ultrafast injects `service_tier: "ultrafast"` only for `gpt-6-astra`. Do not gate either mode by plan metadata.
+6. The footer labels only an effective `Fast` or `Ultrafast` selection. Unsupported selections provide clear command feedback and send no override.
+7. Selected speed propagates through `PI_CHATGPT_SPEED=standard|fast|ultrafast`; effective acceleration continues to propagate through `PI_CHATGPT_FAST=1|0`. Restore both previous values on shutdown.
+8. Persistent config stores `speedMode` plus the compatibility `fastMode` boolean; normalize existing booleans to Fast/Standard without breaking legacy files.
+9. Usage is fetched from ChatGPT's usage endpoint with the OAuth token already stored by Pi.
+10. `CHATGPT_BASE_URL` is only for trusted testing/proxy infrastructure because bearer tokens are sent to it.
 
 Maintenance rules:
 

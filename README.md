@@ -1,8 +1,8 @@
 # pi-chatgpt
 
-A [pi](https://pi.dev) extension for ChatGPT Codex usage and Fast mode.
+A [pi](https://pi.dev) extension for ChatGPT Codex usage and speed modes.
 
-It shows configurable ChatGPT subscription usage next to the active Codex model, provides detailed 5-hour and weekly limits, and can request OpenAI Codex Fast mode for supported models.
+It shows configurable ChatGPT subscription usage next to the active Codex model, provides detailed 5-hour and weekly limits, and can request OpenAI Codex Fast or Ultrafast mode for supported models.
 
 ## Preview
 
@@ -56,21 +56,28 @@ Examples:
 
 Live statuses from other extensions appear alphabetically at the top-right of the first footer row. Long status groups truncate on narrow terminals while preserving the project and session display.
 
-## Fast mode
+## Speed modes
 
-Fast mode requests `service_tier: "priority"` only for the OpenAI-documented supported ChatGPT Codex models: GPT-5.4, GPT-5.5, GPT-5.6 Sol (`gpt-5.6-sol`), GPT-5.6 Terra (`gpt-5.6-terra`), and GPT-5.6 Luna (`gpt-5.6-luna`).
+`/fast` selects one of three modes:
+
+- **Standard** sends no `service_tier` override.
+- **Fast** sends `service_tier: "priority"` for GPT-5.4, GPT-5.5, GPT-5.6 Sol (`gpt-5.6-sol`), GPT-5.6 Terra (`gpt-5.6-terra`), and GPT-5.6 Luna (`gpt-5.6-luna`).
+- **Ultrafast** sends `service_tier: "ultrafast"`; initially, only `gpt-6-astra` is enabled.
 
 ```txt
-/fast temporary   Enable for this running session only
-/fast persistent  Enable now and for future sessions
-/fast off         Disable now and clear persistent enablement
+/fast temporary [standard|fast|ultrafast]   Select for this session
+/fast persistent [standard|fast|ultrafast]  Select now and for future sessions
+/fast off                                   Select Standard persistently
+/fast status                                Show selected and effective mode
 ```
 
-Each command confirms the change. The footer shows `Fast` only when Fast mode is enabled and the active model supports it.
+Omitting the mode from `temporary` or `persistent` still selects Fast, preserving the existing commands. Unsupported models receive no override and the command reports why. The footer shows `Fast` or `Ultrafast` only when the selected mode is effective for the active model.
 
-Fast mode increases supported model speed and consumes ChatGPT credits faster. OpenAI currently documents 2× Standard consumption for GPT-5.4 and 2.5× for GPT-5.5. For the GPT-5.6 models, OpenAI documents 1.5× speed and only “increased usage,” without an exact usage multiplier.
+Selection is not gated by reported plan metadata because eligible Enterprise and Edu accounts may qualify. OpenAI remains responsible for account eligibility and can reject an unavailable tier.
 
-The extension exports the current effective value as `PI_CHATGPT_FAST=1|0`, so newly launched subprocesses inherit it. The previous environment value is restored when the session shuts down. A temporary setting is not written to disk and is lost on reload, session replacement, or process exit.
+Accelerated modes can consume ChatGPT credits faster. OpenAI currently documents 2× Standard consumption for GPT-5.4 and 2.5× for GPT-5.5. For the GPT-5.6 models, OpenAI documents 1.5× speed and only “increased usage,” without an exact usage multiplier.
+
+The selected mode propagates to new subprocesses as `PI_CHATGPT_SPEED=standard|fast|ultrafast`. `PI_CHATGPT_FAST=1|0` remains the effective, model-aware compatibility signal (`1` for effective Fast or Ultrafast). Previous values are restored on shutdown. A temporary selection is not written to disk and is lost on reload, session replacement, or process exit.
 
 ## Configuration and migration
 
@@ -80,7 +87,7 @@ Settings persist globally in:
 ~/.pi/agent/chatgpt.json
 ```
 
-The file stores footer preferences and persistent Fast mode. On first load, legacy `~/.pi/agent/chatgpt-limit.json` settings are migrated without deleting the old file. Legacy session footer entries and `/chatgpt-limit` continue to work.
+The file stores footer preferences, `speedMode`, and the compatibility `fastMode` boolean. Existing `fastMode: true|false` values load as Fast or Standard and migrate on the next settings write. On first load, legacy `~/.pi/agent/chatgpt-limit.json` settings are migrated without deleting the old file. Legacy session footer entries and `/chatgpt-limit` continue to work.
 
 ## Endpoint and security
 

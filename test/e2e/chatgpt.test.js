@@ -166,7 +166,7 @@ function stripAnsi(value) {
     .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
 }
 
-function buildPiArgs(apiKey) {
+function buildPiArgs() {
   return [
     "--no-extensions",
     "--no-skills",
@@ -174,14 +174,13 @@ function buildPiArgs(apiKey) {
     "--no-themes",
     "--no-context-files",
     "--no-session",
+    "--approve",
     "--extension",
     EXTENSION_PATH,
     "--provider",
     "openai-codex",
     "--model",
     "gpt-5.5",
-    "--api-key",
-    apiKey,
   ]
 }
 
@@ -200,15 +199,26 @@ async function runRealPiTui({
   const agentDir = join(tempDir, "agent")
   const sessionDir = join(tempDir, "sessions")
 
+  await mkdir(agentDir, { recursive: true })
+  await writeFile(
+    join(agentDir, "auth.json"),
+    `${JSON.stringify({
+      "openai-codex": {
+        type: "oauth",
+        access: apiKey,
+        refresh: "test-refresh-token",
+        expires: Date.now() + 60 * 60 * 1000,
+      },
+    })}\n`,
+  )
   if (initialConfig) {
-    await mkdir(agentDir, { recursive: true })
     await writeFile(
       join(agentDir, "chatgpt.json"),
       `${JSON.stringify(initialConfig, null, 2)}\n`,
     )
   }
 
-  const piArgs = buildPiArgs(apiKey)
+  const piArgs = buildPiArgs()
   await rm("/tmp/tui", { recursive: true, force: true })
 
   const [command, args] = scriptCommand(outputFile, "pi", piArgs)
@@ -226,6 +236,8 @@ async function runRealPiTui({
       COLUMNS: "160",
       LINES: "40",
       PI_TUI_DEBUG: "1",
+      PI_CHATGPT_FAST: "0",
+      PI_CHATGPT_SPEED: "standard",
       ...extraEnv,
     },
   })
@@ -263,6 +275,7 @@ async function runRealPiTuiExpect({
   submenuText,
   expectText,
   expectedConfig,
+  expectedConfigWritten = true,
   initialConfig,
   scriptBody,
   commandText = "/chatgpt",
@@ -275,15 +288,26 @@ async function runRealPiTuiExpect({
   const expectFile = join(tempDir, "test.exp")
   const agentDir = join(tempDir, "agent")
   const sessionDir = join(tempDir, "sessions")
+  await mkdir(agentDir, { recursive: true })
+  await writeFile(
+    join(agentDir, "auth.json"),
+    `${JSON.stringify({
+      "openai-codex": {
+        type: "oauth",
+        access: apiKey,
+        refresh: "test-refresh-token",
+        expires: Date.now() + 60 * 60 * 1000,
+      },
+    })}\n`,
+  )
   if (initialConfig) {
-    await mkdir(agentDir, { recursive: true })
     await writeFile(
       join(agentDir, "chatgpt.json"),
       `${JSON.stringify(initialConfig, null, 2)}\n`,
     )
   }
 
-  const piArgs = buildPiArgs(apiKey).map(tclDoubleQuote).join(" ")
+  const piArgs = buildPiArgs().map(tclDoubleQuote).join(" ")
   const env = {
     CHATGPT_BASE_URL: baseUrl,
     CHATGPT_TRUST_CUSTOM_BASE_URL: "1",
@@ -293,6 +317,8 @@ async function runRealPiTuiExpect({
     NO_COLOR: "0",
     COLUMNS: "160",
     LINES: "40",
+    PI_CHATGPT_FAST: "0",
+    PI_CHATGPT_SPEED: "standard",
     ...extraEnv,
   }
   const envLines = Object.entries(env)
@@ -339,7 +365,15 @@ close
     if (expectedConfig) {
       assert.deepEqual(
         JSON.parse(await readFile(join(agentDir, "chatgpt.json"), "utf8")),
-        { ...expectedConfig, fastMode: expectedConfig.fastMode ?? false },
+        expectedConfigWritten
+          ? {
+              ...expectedConfig,
+              fastMode: expectedConfig.fastMode ?? false,
+              speedMode:
+                expectedConfig.speedMode ??
+                (expectedConfig.fastMode ? "fast" : "standard"),
+            }
+          : expectedConfig,
       )
     }
     return output
@@ -539,6 +573,24 @@ test("normalizes config and formats percentages without a TUI", () => {
     __test__.normalizeFooterConfig({ quotaWindow: "bad", displayMode: "bad" }),
     { quotaWindow: "weekly", displayMode: "used" },
   )
+  assert.deepEqual(__test__.normalizeGlobalConfig({ fastMode: true }), {
+    quotaWindow: "weekly",
+    displayMode: "used",
+    fastMode: true,
+    speedMode: "fast",
+  })
+  assert.deepEqual(
+    __test__.normalizeGlobalConfig({
+      fastMode: false,
+      speedMode: "ultrafast",
+    }),
+    {
+      quotaWindow: "weekly",
+      displayMode: "used",
+      fastMode: true,
+      speedMode: "ultrafast",
+    },
+  )
   assert.equal(__test__.formatUsedPercent({ usedPercent: 42.6 }), "43%")
   assert.equal(__test__.formatRemainingPercent({ usedPercent: 42.2 }), "58%")
   assert.equal(__test__.isOpenAICodexProvider("openai-codex-2"), true)
@@ -569,10 +621,30 @@ test("normalizes config and formats percentages without a TUI", () => {
     model: "gpt-5.5",
     service_tier: "priority",
   })
+  assert.deepEqual(
+    __test__.addSpeedServiceTier({ model: "gpt-6-astra" }, "ultrafast"),
+    { model: "gpt-6-astra", service_tier: "ultrafast" },
+  )
   assert.equal(__test__.addFastServiceTier(null), undefined)
+  assert.equal(
+    __test__.isUltrafastSupportedModel({
+      provider: "openai-codex",
+      id: "gpt-6-astra",
+    }),
+    true,
+  )
+  assert.equal(
+    __test__.isUltrafastSupportedModel({
+      provider: "openai-codex",
+      id: "gpt-5.5",
+    }),
+    false,
+  )
   assert.equal(__test__.parseFastEnv("1"), true)
   assert.equal(__test__.parseFastEnv("0"), false)
   assert.equal(__test__.parseFastEnv("true"), undefined)
+  assert.equal(__test__.parseSpeedEnv("ULTRAFAST"), "ultrafast")
+  assert.equal(__test__.parseSpeedEnv("turbo"), undefined)
 
   const ctx = {
     model: {
@@ -597,17 +669,28 @@ test("normalizes config and formats percentages without a TUI", () => {
   for (const id of fastModelIds) {
     ctx.model.id = id
     assert.match(
-      __test__.renderFooter(pi, ctx, footerData, theme, 120, true).join("\n"),
+      __test__.renderFooter(pi, ctx, footerData, theme, 120, "fast").join("\n"),
       new RegExp(`${id.replaceAll(".", "\\.")} • Fast`),
     )
   }
+  ctx.model = {
+    provider: "openai-codex",
+    id: "gpt-6-astra",
+    contextWindow: 1000,
+  }
+  assert.match(
+    __test__
+      .renderFooter(pi, ctx, footerData, theme, 120, "ultrafast")
+      .join("\n"),
+    /gpt-6-astra • Ultrafast/,
+  )
   ctx.model = {
     provider: "openai-codex",
     id: "gpt-5.4-mini",
     contextWindow: 1000,
   }
   assert.doesNotMatch(
-    __test__.renderFooter(pi, ctx, footerData, theme, 120, true).join("\n"),
+    __test__.renderFooter(pi, ctx, footerData, theme, 120, "fast").join("\n"),
     /Fast/,
   )
 })
@@ -713,12 +796,14 @@ test("detects TUI mode with context and process fallback", () => {
   )
 })
 
-test("Fast mode commands migrate config, patch supported payloads, and manage inheritance", async () => {
+test("speed commands migrate config, patch tiers, report support, and manage inheritance", async () => {
   const originalAgentDir = process.env.PI_CODING_AGENT_DIR
   const originalFast = process.env.PI_CHATGPT_FAST
+  const originalSpeed = process.env.PI_CHATGPT_SPEED
   const tempDir = await mkdtemp(join(tmpdir(), "pi-chatgpt-fast-"))
   process.env.PI_CODING_AGENT_DIR = tempDir
   process.env.PI_CHATGPT_FAST = "0"
+  delete process.env.PI_CHATGPT_SPEED
   await writeFile(
     join(tempDir, "chatgpt-limit.json"),
     `${JSON.stringify({ quotaWindow: "both", displayMode: "remaining" })}\n`,
@@ -741,20 +826,29 @@ test("Fast mode commands migrate config, patch supported payloads, and manage in
       mode: "rpc",
       model: { provider: "openai-codex", id: "gpt-5.4" },
       sessionManager: { getBranch: () => [] },
-      ui: { notify: (message) => notifications.push(message) },
+      ui: {
+        notify: (message, type) => notifications.push({ message, type }),
+      },
     }
 
     await handlers.get("session_start")?.({}, ctx)
     assert.deepEqual(
       JSON.parse(await readFile(join(tempDir, "chatgpt.json"), "utf8")),
-      { quotaWindow: "both", displayMode: "remaining", fastMode: false },
+      {
+        quotaWindow: "both",
+        displayMode: "remaining",
+        fastMode: false,
+        speedMode: "standard",
+      },
     )
     assert.ok(commands.has("chatgpt"))
     assert.ok(commands.has("chatgpt-limit"))
     assert.equal(process.env.PI_CHATGPT_FAST, "0")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "standard")
 
     await commands.get("fast").handler("temporary", ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "1")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "fast")
     assert.deepEqual(
       handlers.get("before_provider_request")?.(
         { payload: { model: "gpt-5.4", service_tier: "default" } },
@@ -763,52 +857,114 @@ test("Fast mode commands migrate config, patch supported payloads, and manage in
       { model: "gpt-5.4", service_tier: "priority" },
     )
 
-    ctx.model = { provider: "openai-codex", id: "gpt-5.4-mini" }
+    const invalidAgentDir = join(tempDir, "not-a-directory")
+    await writeFile(invalidAgentDir, "")
+    process.env.PI_CODING_AGENT_DIR = invalidAgentDir
+    await assert.rejects(
+      commands.get("fast").handler("persistent ultrafast", ctx),
+    )
+    assert.equal(process.env.PI_CHATGPT_FAST, "1")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "fast")
+    process.env.PI_CODING_AGENT_DIR = tempDir
+
+    ctx.model = { provider: "openai-codex", id: "gpt-5.6-sol" }
     handlers.get("model_select")?.({ model: ctx.model }, ctx)
+    await commands.get("fast").handler("temporary ultrafast", ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "0")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "ultrafast")
     assert.equal(
       handlers.get("before_provider_request")?.({ payload: {} }, ctx),
       undefined,
     )
+    assert.match(
+      notifications.at(-1).message,
+      /Not active: openai-codex\/gpt-5\.6-sol does not support Ultrafast mode.*gpt-6-astra only/,
+    )
+    assert.equal(notifications.at(-1).type, "warning")
 
-    ctx.model = { provider: "openai-codex", id: "gpt-5.6-sol" }
+    ctx.model = { provider: "openai-codex", id: "gpt-6-astra" }
     handlers.get("model_select")?.({ model: ctx.model }, ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "1")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "ultrafast")
     assert.deepEqual(
       handlers.get("before_provider_request")?.(
-        { payload: { model: "gpt-5.6-sol" } },
+        { payload: { model: "gpt-6-astra" } },
         ctx,
       ),
-      { model: "gpt-5.6-sol", service_tier: "priority" },
+      { model: "gpt-6-astra", service_tier: "ultrafast" },
+    )
+
+    await commands.get("fast").handler("persistent ultrafast", ctx)
+    assert.deepEqual(
+      JSON.parse(await readFile(join(tempDir, "chatgpt.json"), "utf8")),
+      {
+        quotaWindow: "both",
+        displayMode: "remaining",
+        fastMode: true,
+        speedMode: "ultrafast",
+      },
     )
 
     ctx.model = { provider: "openai-codex", id: "gpt-5.5" }
     handlers.get("model_select")?.({ model: ctx.model }, ctx)
     await commands.get("fast").handler("persistent", ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "1")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "fast")
     assert.equal(
       JSON.parse(await readFile(join(tempDir, "chatgpt.json"), "utf8"))
-        .fastMode,
-      true,
+        .speedMode,
+      "fast",
     )
 
     await commands.get("fast").handler("off", ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "0")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "standard")
+    assert.deepEqual(
+      JSON.parse(await readFile(join(tempDir, "chatgpt.json"), "utf8")),
+      {
+        quotaWindow: "both",
+        displayMode: "remaining",
+        fastMode: false,
+        speedMode: "standard",
+      },
+    )
+    await commands.get("fast").handler("status", ctx)
     assert.equal(
-      JSON.parse(await readFile(join(tempDir, "chatgpt.json"), "utf8"))
-        .fastMode,
-      false,
+      notifications.at(-1).message,
+      "ChatGPT speed: Standard (active).",
     )
     await commands.get("fast").handler("bad", ctx)
-    assert.deepEqual(notifications, [
-      "Fast mode enabled temporarily.",
-      "Fast mode enabled persistently.",
-      "Fast mode disabled.",
-      "Usage: /fast temporary|persistent|off",
-    ])
+    assert.equal(
+      notifications.at(-1).message,
+      "Usage: /fast temporary|persistent [standard|fast|ultrafast] | off | status",
+    )
 
     await handlers.get("session_shutdown")?.({}, ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "0")
+    assert.equal(process.env.PI_CHATGPT_SPEED, undefined)
+
+    process.env.PI_CHATGPT_SPEED = "ultrafast"
+    const childHandlers = new Map()
+    extension({
+      on(eventName, handler) {
+        childHandlers.set(eventName, handler)
+      },
+      registerCommand() {},
+    })
+    ctx.model = { provider: "openai-codex", id: "gpt-6-astra" }
+    await childHandlers.get("session_start")?.({}, ctx)
+    assert.equal(process.env.PI_CHATGPT_FAST, "1")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "ultrafast")
+    assert.deepEqual(
+      childHandlers.get("before_provider_request")?.(
+        { payload: { model: "gpt-6-astra" } },
+        ctx,
+      ),
+      { model: "gpt-6-astra", service_tier: "ultrafast" },
+    )
+    await childHandlers.get("session_shutdown")?.({}, ctx)
+    assert.equal(process.env.PI_CHATGPT_FAST, "0")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "ultrafast")
   } finally {
     if (originalAgentDir === undefined) {
       delete process.env.PI_CODING_AGENT_DIR
@@ -819,6 +975,11 @@ test("Fast mode commands migrate config, patch supported payloads, and manage in
       delete process.env.PI_CHATGPT_FAST
     } else {
       process.env.PI_CHATGPT_FAST = originalFast
+    }
+    if (originalSpeed === undefined) {
+      delete process.env.PI_CHATGPT_SPEED
+    } else {
+      process.env.PI_CHATGPT_SPEED = originalSpeed
     }
     await rm(tempDir, { recursive: true, force: true })
   }
@@ -872,7 +1033,12 @@ test("RPC fallback configures footer when custom UI is unavailable", async () =>
     await command.handler([], ctx)
     assert.deepEqual(
       JSON.parse(await readFile(join(tempDir, "chatgpt.json"), "utf8")),
-      { quotaWindow: "both", displayMode: "used", fastMode: false },
+      {
+        quotaWindow: "both",
+        displayMode: "used",
+        fastMode: false,
+        speedMode: "standard",
+      },
     )
 
     selectResponses.push(
@@ -882,7 +1048,12 @@ test("RPC fallback configures footer when custom UI is unavailable", async () =>
     await command.handler([], ctx)
     assert.deepEqual(
       JSON.parse(await readFile(join(tempDir, "chatgpt.json"), "utf8")),
-      { quotaWindow: "both", displayMode: "remaining", fastMode: false },
+      {
+        quotaWindow: "both",
+        displayMode: "remaining",
+        fastMode: false,
+        speedMode: "standard",
+      },
     )
     assert.equal(customCalls, 2)
     assert.deepEqual(notifications, [
@@ -1038,6 +1209,7 @@ test(
         apiKey: token,
         initialConfig: defaultConfig,
         expectedConfig: defaultConfig,
+        expectedConfigWritten: false,
         scriptBody: `${expectBlock("Configure footer display mode")}
 send "${expectSendLiteral(displayModeMenu)}"
 ${expectBlock("How should the footer value be shown?")}

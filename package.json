@@ -1,7 +1,7 @@
 {
   "name": "pi-chatgpt",
   "version": "0.3.0",
-  "description": "ChatGPT Codex usage and Fast mode support for pi",
+  "description": "ChatGPT Codex usage and speed mode support for pi",
   "type": "module",
   "scripts": {
     "test": "node --test test/e2e/*.test.js",
