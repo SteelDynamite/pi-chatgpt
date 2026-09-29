@@ -142,16 +142,23 @@ function resolveChatGptBaseUrl(value, trustCustomBaseUrl = false) {
 }
 
 /** @param {string | undefined} provider */
-function isOpenAICodexProvider(provider) {
+function isChatGptProvider(provider) {
   return (
-    provider === "openai-codex" || /^openai-codex-\d+$/.test(provider || "")
+    provider === "openai" ||
+    provider === "openai-codex" ||
+    /^openai-codex-\d+$/.test(provider || "")
   )
+}
+
+function isChatGptModel(model, modelRegistry) {
+  // Unified OpenAI uses the same API and base URL for OAuth and API keys.
+  return isChatGptProvider(model?.provider) && modelRegistry.isUsingOAuth(model)
 }
 
 /** @param {{ provider?: string, id?: string } | undefined} model */
 function isFastSupportedModel(model) {
   return (
-    isOpenAICodexProvider(model?.provider) &&
+    isChatGptProvider(model?.provider) &&
     FAST_SUPPORTED_MODELS.has(model?.id || "")
   )
 }
@@ -159,7 +166,7 @@ function isFastSupportedModel(model) {
 /** @param {{ provider?: string, id?: string } | undefined} model */
 function isUltrafastSupportedModel(model) {
   return (
-    isOpenAICodexProvider(model?.provider) &&
+    isChatGptProvider(model?.provider) &&
     ULTRAFAST_SUPPORTED_MODELS.has(model?.id || "")
   )
 }
@@ -168,8 +175,9 @@ function isUltrafastSupportedModel(model) {
  * @param {{ provider?: string, id?: string } | undefined} model
  * @param {string} speedMode
  */
-function isSpeedModeSupported(model, speedMode) {
+function isSpeedModeSupported(model, speedMode, modelRegistry) {
   if (speedMode === STANDARD_MODE) return true
+  if (!isChatGptModel(model, modelRegistry)) return false
   if (speedMode === FAST_MODE) return isFastSupportedModel(model)
   if (speedMode === ULTRAFAST_MODE) return isUltrafastSupportedModel(model)
   return false
@@ -683,11 +691,14 @@ function renderFooter(
         : `${modelName} • ${thinkingLevel}`
   }
 
-  if (speedMode !== STANDARD_MODE && isSpeedModeSupported(model, speedMode)) {
+  if (
+    speedMode !== STANDARD_MODE &&
+    isSpeedModeSupported(model, speedMode, ctx.modelRegistry)
+  ) {
     rightSideWithoutProvider += ` • ${SPEED_MODE_LABELS[speedMode]}`
   }
 
-  if (isOpenAICodexProvider(model?.provider)) {
+  if (isChatGptModel(model, ctx.modelRegistry)) {
     const footerUsage = formatFooterUsage(theme)
     if (footerUsage) {
       rightSideWithoutProvider += ` • ${footerUsage}`
@@ -789,7 +800,7 @@ function installFooter(pi, ctx, getSpeedMode) {
 /** @param {PiExtensionContext} ctx */
 async function updateUsage(ctx) {
   const model = ctx.model
-  if (!isOpenAICodexProvider(model?.provider)) {
+  if (!isChatGptModel(model, ctx.modelRegistry)) {
     usageSnapshot = undefined
     requestRender()
     return undefined
@@ -1041,7 +1052,7 @@ export const __test__ = {
   isFastSupportedModel,
   isSpeedModeSupported,
   isUltrafastSupportedModel,
-  isOpenAICodexProvider,
+  isChatGptProvider,
   normalizeFooterConfig,
   normalizeGlobalConfig,
   parseFastEnv,
@@ -1076,9 +1087,10 @@ export default function (pi) {
     queueUpdateInBackground(ctx)
   }
 
-  function updateSpeedEnvironment(model) {
+  function updateSpeedEnvironment(ctx, model = ctx.model) {
     const fastValue =
-      speedMode !== STANDARD_MODE && isSpeedModeSupported(model, speedMode)
+      speedMode !== STANDARD_MODE &&
+      isSpeedModeSupported(model, speedMode, ctx.modelRegistry)
         ? "1"
         : "0"
     process.env[FAST_ENV] = fastValue
@@ -1133,9 +1145,9 @@ export default function (pi) {
 
     if (!action) return
 
-    if (!isOpenAICodexProvider(ctx.model?.provider)) {
+    if (!isChatGptModel(ctx.model, ctx.modelRegistry)) {
       ctx.ui.notify(
-        "ChatGPT limits are only available for openai-codex models.",
+        "ChatGPT limits require an openai (or legacy openai-codex) model authenticated with ChatGPT OAuth via /login.",
         "info",
       )
       return
@@ -1164,7 +1176,7 @@ export default function (pi) {
         : inheritedFastEnabled
           ? FAST_MODE
           : STANDARD_MODE)
-    updateSpeedEnvironment(ctx.model)
+    updateSpeedEnvironment(ctx)
     if (!isTuiContext(ctx)) return
 
     installFooter(pi, ctx, () => speedMode)
@@ -1172,7 +1184,7 @@ export default function (pi) {
   })
 
   pi.on("model_select", (event, ctx) => {
-    updateSpeedEnvironment(event.model || ctx.model)
+    updateSpeedEnvironment(ctx, event.model || ctx.model)
     queueAutomaticUpdateInBackground(ctx)
   })
   pi.on("agent_end", (_event, ctx) => queueAutomaticUpdateInBackground(ctx))
@@ -1180,7 +1192,7 @@ export default function (pi) {
   pi.on("before_provider_request", (event, ctx) => {
     if (
       speedMode === STANDARD_MODE ||
-      !isSpeedModeSupported(ctx.model, speedMode)
+      !isSpeedModeSupported(ctx.model, speedMode, ctx.modelRegistry)
     )
       return undefined
     return addSpeedServiceTier(event.payload, speedMode)
@@ -1225,9 +1237,11 @@ export default function (pi) {
         const state =
           speedMode === STANDARD_MODE
             ? "active"
-            : isSpeedModeSupported(ctx.model, speedMode)
-              ? "active"
-              : `selected; unsupported by ${modelName}`
+            : !isChatGptModel(ctx.model, ctx.modelRegistry)
+              ? "selected; requires ChatGPT OAuth via /login on openai or legacy openai-codex"
+              : isSpeedModeSupported(ctx.model, speedMode, ctx.modelRegistry)
+                ? "active"
+                : `selected; unsupported by ${modelName}`
         ctx.ui.notify(
           `ChatGPT speed: ${label} (${state}).`,
           state === "active" ? "info" : "warning",
@@ -1265,7 +1279,7 @@ export default function (pi) {
         }
       }
       speedMode = selectedSpeedMode
-      updateSpeedEnvironment(ctx.model)
+      updateSpeedEnvironment(ctx)
 
       let message = isOff
         ? "Fast mode disabled."
@@ -1274,19 +1288,24 @@ export default function (pi) {
           : `${SPEED_MODE_LABELS[speedMode]} mode selected ${scope === "temporary" ? "temporarily" : "persistently"}.`
       if (
         speedMode !== STANDARD_MODE &&
-        !isSpeedModeSupported(ctx.model, speedMode)
+        !isSpeedModeSupported(ctx.model, speedMode, ctx.modelRegistry)
       ) {
-        const modelName = ctx.model
-          ? `${ctx.model.provider}/${ctx.model.id}`
-          : "the current model"
-        message += ` Not active: ${modelName} does not support ${SPEED_MODE_LABELS[speedMode]} mode.`
-        if (speedMode === ULTRAFAST_MODE)
-          message += " Ultrafast currently supports gpt-6-astra only."
+        if (!isChatGptModel(ctx.model, ctx.modelRegistry)) {
+          message +=
+            " Not active: requires ChatGPT OAuth via /login on openai or legacy openai-codex."
+        } else {
+          const modelName = ctx.model
+            ? `${ctx.model.provider}/${ctx.model.id}`
+            : "the current model"
+          message += ` Not active: ${modelName} does not support ${SPEED_MODE_LABELS[speedMode]} mode.`
+          if (speedMode === ULTRAFAST_MODE)
+            message += " Ultrafast currently supports gpt-6-astra only."
+        }
       }
       ctx.ui.notify(
         message,
         speedMode !== STANDARD_MODE &&
-          !isSpeedModeSupported(ctx.model, speedMode)
+          !isSpeedModeSupported(ctx.model, speedMode, ctx.modelRegistry)
           ? "warning"
           : "info",
       )

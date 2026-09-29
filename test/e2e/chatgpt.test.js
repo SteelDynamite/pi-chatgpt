@@ -166,7 +166,7 @@ function stripAnsi(value) {
     .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
 }
 
-function buildPiArgs() {
+function buildPiArgs(model = "gpt-5.5") {
   return [
     "--no-extensions",
     "--no-skills",
@@ -178,15 +178,17 @@ function buildPiArgs() {
     "--extension",
     EXTENSION_PATH,
     "--provider",
-    "openai-codex",
+    "openai",
     "--model",
-    "gpt-5.5",
+    model,
   ]
 }
 
 async function runRealPiTui({
   baseUrl,
   apiKey,
+  model = "gpt-5.5",
+  runtimeApiKey,
   extraEnv = {},
   initialConfig,
   trustEnvName = "CHATGPT_TRUST_CUSTOM_BASE_URL",
@@ -203,7 +205,7 @@ async function runRealPiTui({
   await writeFile(
     join(agentDir, "auth.json"),
     `${JSON.stringify({
-      "openai-codex": {
+      openai: {
         type: "oauth",
         access: apiKey,
         refresh: "test-refresh-token",
@@ -218,7 +220,8 @@ async function runRealPiTui({
     )
   }
 
-  const piArgs = buildPiArgs()
+  const piArgs = buildPiArgs(model)
+  if (runtimeApiKey) piArgs.push("--api-key", runtimeApiKey)
   await rm("/tmp/tui", { recursive: true, force: true })
 
   const [command, args] = scriptCommand(outputFile, "pi", piArgs)
@@ -292,7 +295,7 @@ async function runRealPiTuiExpect({
   await writeFile(
     join(agentDir, "auth.json"),
     `${JSON.stringify({
-      "openai-codex": {
+      openai: {
         type: "oauth",
         access: apiKey,
         refresh: "test-refresh-token",
@@ -404,6 +407,7 @@ test("skips automatic footer and usage work outside TUI mode", async () => {
         mode,
         model: { provider: "openai-codex", id: "gpt-5.5" },
         modelRegistry: {
+          isUsingOAuth: () => true,
           getApiKeyAndHeaders: async () => {
             usageAuthCalls++
             return { ok: false }
@@ -462,6 +466,7 @@ test("installs footer when ctx.mode is unavailable but process looks interactive
     const ctx = {
       model: { provider: "openai-codex", id: "gpt-5.5" },
       modelRegistry: {
+        isUsingOAuth: () => true,
         getApiKeyAndHeaders: async () => {
           usageAuthCalls++
           return { ok: false }
@@ -593,7 +598,8 @@ test("normalizes config and formats percentages without a TUI", () => {
   )
   assert.equal(__test__.formatUsedPercent({ usedPercent: 42.6 }), "43%")
   assert.equal(__test__.formatRemainingPercent({ usedPercent: 42.2 }), "58%")
-  assert.equal(__test__.isOpenAICodexProvider("openai-codex-2"), true)
+  assert.equal(__test__.isChatGptProvider("openai-codex-2"), true)
+  assert.equal(__test__.isChatGptProvider("openai"), true)
   const fastModelIds = [
     "gpt-5.4",
     "gpt-5.5",
@@ -614,7 +620,7 @@ test("normalizes config and formats percentages without a TUI", () => {
     )
   }
   assert.equal(
-    __test__.isFastSupportedModel({ provider: "openai", id: "gpt-5.5" }),
+    __test__.isFastSupportedModel({ provider: "anthropic", id: "gpt-5.5" }),
     false,
   )
   assert.deepEqual(__test__.addFastServiceTier({ model: "gpt-5.5" }), {
@@ -825,6 +831,7 @@ test("speed commands migrate config, patch tiers, report support, and manage inh
     const ctx = {
       mode: "rpc",
       model: { provider: "openai-codex", id: "gpt-5.4" },
+      modelRegistry: { isUsingOAuth: () => true },
       sessionManager: { getBranch: () => [] },
       ui: {
         notify: (message, type) => notifications.push({ message, type }),
@@ -985,6 +992,207 @@ test("speed commands migrate config, patch tiers, report support, and manage inh
   }
 })
 
+test("unified openai OAuth supports speed modes and usage, but API keys do not", async (t) => {
+  const originalEnv = { ...process.env }
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-chatgpt-openai-"))
+  process.env.PI_CODING_AGENT_DIR = tempDir
+  delete process.env.PI_CHATGPT_SPEED
+  delete process.env.PI_CHATGPT_FAST
+  const handlers = new Map()
+  const commands = new Map()
+  const notifications = []
+  const menus = []
+  let oauth = true
+  let authCalls = 0
+  let token = fakeJwt({
+    "https://api.openai.com/auth": { chatgpt_account_id: "acct_unified" },
+  })
+  const fetchMock = t.mock.method(globalThis, "fetch", async (url, options) => {
+    assert.equal(url, "https://chatgpt.com/backend-api/wham/usage")
+    assert.equal(options.headers.Authorization, `Bearer ${token}`)
+    return new Response(
+      JSON.stringify({
+        plan_type: "enterprise",
+        rate_limit: {
+          primary_window: {
+            used_percent: 42,
+            limit_window_seconds: 7 * 24 * 60 * 60,
+          },
+        },
+      }),
+    )
+  })
+  // Pi 0.99.1's unified catalog keeps this shape for both OAuth and API keys.
+  const ctx = {
+    mode: "rpc",
+    model: {
+      provider: "openai",
+      id: "gpt-6-astra",
+      api: "openai-responses",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: true,
+      contextWindow: 272000,
+    },
+    modelRegistry: {
+      isUsingOAuth: () => oauth,
+      getApiKeyAndHeaders: async () => {
+        authCalls++
+        return { ok: true, apiKey: oauth ? token : "test-api-key" }
+      },
+    },
+    sessionManager: {
+      getBranch: () => [],
+      getEntries: () => [],
+      getCwd: () => "/tmp/project",
+      getSessionName: () => undefined,
+    },
+    getContextUsage: () => ({ contextWindow: 272000, percent: 0 }),
+    ui: {
+      notify: (message, type) => notifications.push({ message, type }),
+      select: async (_title, options) => {
+        menus.push(options)
+        return options[0]
+      },
+    },
+  }
+  const footer = () =>
+    __test__
+      .renderFooter(
+        {},
+        ctx,
+        { getGitBranch: () => undefined, getAvailableProviderCount: () => 1 },
+        { fg: (_color, text) => text },
+        160,
+        process.env.PI_CHATGPT_SPEED,
+      )
+      .join("\n")
+  extension({
+    on: (name, handler) => handlers.set(name, handler),
+    registerCommand: (name, command) => commands.set(name, command),
+  })
+  try {
+    await handlers.get("session_start")({}, ctx)
+    await commands.get("fast").handler("persistent ultrafast", ctx)
+    assert.deepEqual(notifications.at(-1), {
+      message: "Ultrafast mode selected persistently.",
+      type: "info",
+    })
+    assert.equal(process.env.PI_CHATGPT_FAST, "1")
+    assert.equal(process.env.PI_CHATGPT_SPEED, "ultrafast")
+    assert.equal(
+      JSON.parse(await readFile(join(tempDir, "chatgpt.json"), "utf8"))
+        .speedMode,
+      "ultrafast",
+    )
+    await commands.get("fast").handler("status", ctx)
+    assert.equal(
+      notifications.at(-1).message,
+      "ChatGPT speed: Ultrafast (active).",
+    )
+    const payload = { model: "gpt-6-astra", service_tier: "default" }
+    assert.deepEqual(
+      handlers.get("before_provider_request")({ payload }, ctx),
+      {
+        ...payload,
+        service_tier: "ultrafast",
+      },
+    )
+    assert.equal(payload.service_tier, "default")
+    assert.match(footer(), /Ultrafast/)
+    await commands.get("chatgpt").handler("", ctx)
+    assert.ok(menus.at(-1).includes("provider: openai"))
+    assert.ok(menus.at(-1).includes("plan: enterprise"))
+    assert.match(footer(), /W 42%/)
+    await handlers.get("session_start")({}, ctx)
+    assert.equal(process.env.PI_CHATGPT_SPEED, "ultrafast")
+    assert.equal(process.env.PI_CHATGPT_FAST, "1")
+
+    for (const id of [
+      "gpt-5.4",
+      "gpt-5.5",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+    ]) {
+      ctx.model.id = id
+      handlers.get("model_select")({ model: ctx.model }, ctx)
+      assert.equal(process.env.PI_CHATGPT_FAST, "0")
+      assert.equal(
+        handlers.get("before_provider_request")({ payload: {} }, ctx),
+        undefined,
+      )
+      assert.doesNotMatch(footer(), /Ultrafast/)
+      await commands.get("fast").handler("temporary fast", ctx)
+      assert.equal(notifications.at(-1).type, "info")
+      assert.equal(process.env.PI_CHATGPT_FAST, "1")
+      assert.equal(
+        handlers.get("before_provider_request")({ payload: {} }, ctx)
+          .service_tier,
+        "priority",
+      )
+      assert.match(footer(), /Fast/)
+      await commands.get("fast").handler("temporary ultrafast", ctx)
+      assert.equal(notifications.at(-1).type, "warning")
+    }
+    oauth = false
+    for (const [id, mode] of [
+      ["gpt-6-astra", "ultrafast"],
+      ["gpt-5.5", "fast"],
+    ]) {
+      ctx.model.id = id
+      await commands.get("fast").handler(`temporary ${mode}`, ctx)
+      assert.equal(notifications.at(-1).type, "warning")
+      assert.match(notifications.at(-1).message, /ChatGPT OAuth/)
+      assert.equal(process.env.PI_CHATGPT_FAST, "0")
+      assert.equal(
+        handlers.get("before_provider_request")({ payload: {} }, ctx),
+        undefined,
+      )
+      assert.doesNotMatch(footer(), /Ultrafast|Fast|W 42%/)
+      await commands.get("chatgpt").handler("", ctx)
+    }
+    ctx.mode = "tui"
+    ctx.ui.setFooter = () => {}
+    await handlers.get("session_start")({}, ctx)
+    await new Promise((resolveWait) => setTimeout(resolveWait, 20))
+    assert.equal(authCalls, 1)
+    assert.equal(fetchMock.mock.callCount(), 1)
+
+    // Usage must work in Standard mode and resolve credentials on every refresh.
+    oauth = true
+    await commands.get("fast").handler("temporary standard", ctx)
+    for (const event of ["model_select", "agent_end"]) {
+      token = `test-refreshed-${event}`
+      handlers.get(event)({ model: ctx.model }, ctx)
+      await new Promise(setImmediate)
+      assert.match(footer(), /W 42%/)
+      assert.doesNotMatch(footer(), /Ultrafast|Fast/)
+    }
+    await commands.get("chatgpt-limit").handler("", ctx)
+    assert.ok(menus.at(-1).includes("provider: openai"))
+    assert.equal(authCalls, 4)
+    assert.equal(fetchMock.mock.callCount(), 4)
+
+    // Switching away clears subscription usage without resolving a credential.
+    ctx.model = { ...ctx.model, provider: "anthropic" }
+    handlers.get("model_select")({ model: ctx.model }, ctx)
+    await new Promise(setImmediate)
+    assert.doesNotMatch(footer(), /W 42%/)
+    assert.equal(authCalls, 4)
+  } finally {
+    await handlers.get("session_shutdown")({}, ctx)
+    for (const name of [
+      "PI_CODING_AGENT_DIR",
+      "PI_CHATGPT_SPEED",
+      "PI_CHATGPT_FAST",
+    ]) {
+      if (originalEnv[name] === undefined) delete process.env[name]
+      else process.env[name] = originalEnv[name]
+    }
+    await rm(tempDir, { recursive: true, force: true })
+  }
+})
+
 test("RPC fallback configures footer when custom UI is unavailable", async () => {
   const originalAgentDir = process.env.PI_CODING_AGENT_DIR
   const tempDir = await mkdtemp(join(tmpdir(), "pi-chatgpt-rpc-"))
@@ -1110,6 +1318,46 @@ test(
       )
       assert.match(output, /gpt-5\.5/)
       assert.match(output, /42%/)
+    } finally {
+      await server.close()
+    }
+  },
+)
+
+test(
+  "real pi unified openai Astra distinguishes OAuth from a runtime API key",
+  { skip: SCRIPT_SKIP },
+  async () => {
+    const token = fakeJwt({
+      "https://api.openai.com/auth": { chatgpt_account_id: "acct_astra" },
+    })
+    const server = await startUsageServer((_req, res) => sendUsageResponse(res))
+    try {
+      const options = {
+        baseUrl: server.baseUrl,
+        apiKey: token,
+        model: "gpt-6-astra",
+        extraEnv: { PI_CHATGPT_SPEED: "ultrafast" },
+      }
+      const { output } = await runRealPiTui({
+        ...options,
+        waitFor: (text) =>
+          stripAnsi(text).includes("Ultrafast") &&
+          stripAnsi(text).includes("W 42%"),
+      })
+      assert.match(stripAnsi(output), /Ultrafast/)
+      assert.match(stripAnsi(output), /W 42%/)
+      assert.ok(server.requests.length > 0)
+      const requestCount = server.requests.length
+      const apiKeyRun = await runRealPiTui({
+        ...options,
+        runtimeApiKey: "test-api-key",
+        waitFor: (text) => stripAnsi(text).includes("gpt-6-astra"),
+        settleMs: 500,
+      })
+      assert.match(stripAnsi(apiKeyRun.output), /gpt-6-astra/)
+      assert.doesNotMatch(stripAnsi(apiKeyRun.output), /Ultrafast|W 42%/)
+      assert.equal(server.requests.length, requestCount)
     } finally {
       await server.close()
     }
