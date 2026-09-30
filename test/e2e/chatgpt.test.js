@@ -995,6 +995,10 @@ test("speed commands migrate config, patch tiers, report support, and manage inh
 test("unified openai OAuth supports speed modes and usage, but API keys do not", async (t) => {
   const originalEnv = { ...process.env }
   const tempDir = await mkdtemp(join(tmpdir(), "pi-chatgpt-openai-"))
+  await writeFile(
+    join(tempDir, "chatgpt.json"),
+    JSON.stringify({ quotaWindow: "both", displayMode: "compact" }),
+  )
   process.env.PI_CODING_AGENT_DIR = tempDir
   delete process.env.PI_CHATGPT_SPEED
   delete process.env.PI_CHATGPT_FAST
@@ -1004,12 +1008,15 @@ test("unified openai OAuth supports speed modes and usage, but API keys do not",
   const menus = []
   let oauth = true
   let authCalls = 0
+  let httpStatus = 200
   let token = fakeJwt({
     "https://api.openai.com/auth": { chatgpt_account_id: "acct_unified" },
   })
   const fetchMock = t.mock.method(globalThis, "fetch", async (url, options) => {
     assert.equal(url, "https://chatgpt.com/backend-api/wham/usage")
     assert.equal(options.headers.Authorization, `Bearer ${token}`)
+    if (httpStatus !== 200)
+      return new Response("private server error", { status: httpStatus })
     return new Response(
       JSON.stringify({
         plan_type: "enterprise",
@@ -1179,6 +1186,25 @@ test("unified openai OAuth supports speed modes and usage, but API keys do not",
     await new Promise(setImmediate)
     assert.doesNotMatch(footer(), /W 42%/)
     assert.equal(authCalls, 4)
+
+    ctx.model.provider = "openai"
+    for (const status of [401, 403, 429, 500]) {
+      httpStatus = status
+      await commands.get("chatgpt").handler("", ctx)
+      assert.deepEqual(notifications.at(-1), {
+        message: `Could not load ChatGPT usage limits (HTTP ${status}).`,
+        type: "warning",
+      })
+      assert.ok(footer().includes(`Usage: HTTP ${status}`))
+      assert.doesNotMatch(footer(), /W 42%|private server error/)
+      oauth = false
+      assert.doesNotMatch(footer(), /Usage: HTTP/)
+      oauth = true
+    }
+    httpStatus = 200
+    await commands.get("chatgpt").handler("", ctx)
+    assert.match(footer(), /W 42%/)
+    assert.doesNotMatch(footer(), /5h|Usage: HTTP/)
   } finally {
     await handlers.get("session_shutdown")({}, ctx)
     for (const name of [
@@ -1360,6 +1386,52 @@ test(
       assert.equal(server.requests.length, requestCount)
     } finally {
       await server.close()
+    }
+  },
+)
+
+test(
+  "real pi TUI shows quota rejection and supports weekly-only plans",
+  { skip: SCRIPT_SKIP },
+  async (t) => {
+    const token = fakeJwt({})
+    for (const status of [401, 200]) {
+      await t.test(`HTTP ${status}`, async () => {
+        const server = await startUsageServer((_req, res) => {
+          res.writeHead(status, { "content-type": "application/json" })
+          res.end(
+            JSON.stringify(
+              status === 401
+                ? { error: "private server error" }
+                : {
+                    rate_limit: {
+                      primary_window: {
+                        used_percent: 42,
+                        limit_window_seconds: 604800,
+                        reset_at: Math.floor(Date.now() / 1000) + 86400,
+                      },
+                      secondary_window: null,
+                    },
+                  },
+            ),
+          )
+        })
+        try {
+          const expected = status === 401 ? "Usage: HTTP 401" : "W 42%"
+          const { output } = await runRealPiTui({
+            baseUrl: server.baseUrl,
+            apiKey: token,
+            model: "gpt-6-astra",
+            initialConfig: { quotaWindow: "both", displayMode: "compact" },
+            waitFor: (text) => stripAnsi(text).includes(expected),
+          })
+          assert.ok(server.requests.length > 0)
+          assert.ok(stripAnsi(output).includes(expected))
+          assert.doesNotMatch(stripAnsi(output), /5h \d+%|private server error/)
+        } finally {
+          await server.close()
+        }
+      })
     }
   },
 )

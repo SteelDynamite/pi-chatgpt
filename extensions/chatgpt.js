@@ -594,6 +594,8 @@ function formatFooterUsagePart(label, window, theme) {
 
 function formatFooterUsage(theme) {
   if (footerConfig.quotaWindow === "hidden") return undefined
+  if (usageSnapshot?.httpStatus)
+    return theme.fg("warning", `Usage: HTTP ${usageSnapshot.httpStatus}`)
 
   const parts = []
   if (
@@ -835,7 +837,8 @@ async function updateUsage(ctx) {
       signal: AbortSignal.timeout(15000),
     })
     if (!response.ok) {
-      usageSnapshot = undefined
+      // Keep only the status; server error bodies may contain private data.
+      usageSnapshot = { httpStatus: response.status }
       requestRender()
       return undefined
     }
@@ -1155,7 +1158,11 @@ export default function (pi) {
 
     const snapshot = await queueUpdate(ctx)
     if (!snapshot) {
-      ctx.ui.notify("Could not load ChatGPT usage limits.", "warning")
+      const status = usageSnapshot?.httpStatus
+      ctx.ui.notify(
+        `Could not load ChatGPT usage limits${status ? ` (HTTP ${status})` : ""}.`,
+        "warning",
+      )
       return
     }
 

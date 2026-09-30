@@ -55,6 +55,12 @@ This shows and configures:
 
 In interactive Pi, usage refreshes on session start, model changes, and completed agent runs, independently of the selected speed mode. `/chatgpt` → “Show current usage details” also refreshes it manually, including after `/login`. Pi resolves the effective credential and refreshes expiring OAuth tokens before each usage request.
 
+Some plans return only a weekly window. With “Both” selected, the footer shows whichever windows the endpoint provides; a missing 5-hour window does not hide weekly usage.
+
+If the usage endpoint rejects a request, the footer shows a safe status such as `Usage: HTTP 401` (unless hidden), and `/chatgpt` reports the HTTP status. Server error bodies and credentials are never displayed. Successful refreshes replace the error with usage again.
+
+ChatGPT OAuth access to model requests does not guarantee access to the separate usage endpoint. A 401 means the usage request was rejected, not that the footer needs reloading; resolving it requires checking credential compatibility with that endpoint.
+
 Examples:
 
 - `W 42%`
@@ -63,6 +69,42 @@ Examples:
 - `5h 25% / W 42%`
 
 Live statuses from other extensions appear alphabetically at the top-right of the first footer row. Long status groups truncate on narrow terminals while preserving the project and session display.
+
+### Passive quota diagnostic (optional)
+
+`extensions/quota-diagnostic.js` is a separate companion, **not loaded by `index.js`**. It does not fix the footer or replace the usage endpoint. Keep your current project's working directory and session; do not switch into this checkout to activate it.
+
+**Preferred: reload in place.** If the checkout is at `repos/pi-chatgpt` under your current project, create a new temporary `.pi/extensions/chatgpt-quota-diagnostic.ts` in that project (do not overwrite an existing file):
+
+```ts
+export { default } from "../../repos/pi-chatgpt/extensions/quota-diagnostic.js"
+```
+
+Then run `/reload` in the existing, idle Pi session. Pi 0.99.1 discovers project `.ts` extensions and imports their default factory; this re-export preserves the companion's factory. Reload retains the session and cwd. Project resources must already be trusted and enabled (not disabled by `--no-extensions` or resource filters). The shim must be staged by someone authorized to modify that project. No package or settings edits are required.
+
+**Restart alternative:** from the original project cwd, with no shim loaded:
+
+```sh
+pi --continue --extension ./repos/pi-chatgpt/extensions/quota-diagnostic.js
+```
+
+`--continue` chooses the most recent session for that cwd, not necessarily the session you intended if several exist. To select the exact session, replace it with `--session /absolute/path/to/the/intended-session.jsonl`, still launching from the original cwd. Adjust the extension path to your checkout; an absolute extension path also avoids changing cwd. Do not load both the shim and the CLI companion. Neither method replaces or updates the Git-installed package.
+
+1. While idle on an OpenAI model authenticated with ChatGPT OAuth, run `/chatgpt-quota-diagnostic arm`.
+2. Continue your normal work with the request you already intended. Do not send a diagnostic-only prompt.
+3. After it finishes, run `/chatgpt-quota-diagnostic show` and copy the report if needed.
+4. Run `/chatgpt-quota-diagnostic off` to clear memory. Remove only the temporary shim and `/reload`, or restart without `--extension` if using the CLI method.
+
+Capture stops at the next provider request or `agent_end`, so tool continuations are excluded. Model changes, reload, and shutdown clear it. The diagnostic makes no requests, resolves no credentials, changes no request data, and writes no files or session entries. It retains only hook counts and these allowlisted fields in memory, displayed on demand:
+
+- Headers: `x-codex-{primary,secondary}-{used-percent,window-minutes,reset-at}`.
+- Events with type exactly `codex.rate_limits`: `rate_limits.{primary,secondary}.{used_percent,window_minutes,reset_at}` (latest event only).
+
+Values must be finite nonnegative numbers; window minutes and Unix reset seconds must be safe integers. Header numeric strings are converted to numbers. Malformed values appear only as `"invalid"`; missing fields are omitted, not interpreted as zero. Credentials, account identifiers, plan metadata, content, bodies, other events, and complete headers are never retained or displayed.
+
+The candidate schema comes from [OpenAI Codex's parser](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/rate_limits.rs). Pi 0.99.1 exposes `after_provider_response` before stream consumption and `provider_stream_event` before normalization. This does **not** confirm that public-API OAuth responses include Codex quota metadata. Empty quota objects with positive hook counts mean those fields were not observed; zero hook counts mean no eligible hook was observed, not zero usage. The response hook lacks model identity, so it is gated by the active model's OAuth status; stream events additionally must match that model. No quota-to-footer mapping is enabled without live evidence.
+
+**Observed limitation (Pi 0.99.1):** one user-reported normal request on `openai` with direct-use ChatGPT OAuth returned `responseHooks=1`, `streamHooks=30`, `quotaEvents=0`, `headers={}`, and `streamQuota={}`. The hooks fired, but this request exposed no allowlisted quota metadata. Together with the usage endpoint's previously observed HTTP 401 for that credential, there is currently no verified path to restore numeric quota display for it. This is evidence from one request, not proof that every credential or future response lacks quota metadata; it does not mean usage is zero. Check the official [Codex usage settings](https://chatgpt.com/codex/settings/usage) for account usage.
 
 ## Speed modes
 
