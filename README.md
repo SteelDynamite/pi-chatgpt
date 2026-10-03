@@ -57,6 +57,8 @@ In interactive Pi, usage refreshes on session start, model changes, and complete
 
 Some plans return only a weekly window. With “Both” selected, the footer shows whichever windows the endpoint provides; a missing 5-hour window does not hide weekly usage.
 
+Malformed quota numbers are treated as unavailable, not zero usage. Usage must be finite and nonnegative; window durations must be positive safe integers in seconds. Invalid reset timestamps (not nonnegative safe-integer Unix seconds) leave valid usage visible but reset and pace unknown.
+
 If the usage endpoint rejects a request, the footer shows a safe status such as `Usage: HTTP 401` (unless hidden), and `/chatgpt` reports the HTTP status. Server error bodies and credentials are never displayed. Successful refreshes replace the error with usage again.
 
 ChatGPT OAuth access to model requests does not guarantee access to the separate usage endpoint. A 401 means the usage request was rejected, not that the footer needs reloading; resolving it requires checking credential compatibility with that endpoint.

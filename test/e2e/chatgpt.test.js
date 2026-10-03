@@ -2,14 +2,7 @@ import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
 import { once } from "node:events"
 import { existsSync } from "node:fs"
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import http from "node:http"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -106,25 +99,6 @@ async function readIfExists(path) {
   return readFile(path, "utf8")
 }
 
-function stripEscapedAnsi(value) {
-  return String(value)
-    .replace(/\\u001b\][^\n]*?\\u0007/g, "")
-    .replace(/\\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-}
-
-async function readTuiDebugOutput() {
-  try {
-    const files = await readdir("/tmp/tui")
-    const contents = await Promise.all(
-      files.map((file) => readIfExists(join("/tmp/tui", file))),
-    )
-    const output = contents.join("\n")
-    return `${output}\n${stripEscapedAnsi(output)}`
-  } catch {
-    return ""
-  }
-}
-
 async function waitForOutput(
   path,
   predicate,
@@ -198,6 +172,7 @@ async function runRealPiTui({
 }) {
   const tempDir = await mkdtemp(join(tmpdir(), "pi-chatgpt-e2e-"))
   const outputFile = join(tempDir, "typescript.log")
+  const tuiLogFile = join(tempDir, "tui.log")
   const agentDir = join(tempDir, "agent")
   const sessionDir = join(tempDir, "sessions")
 
@@ -222,8 +197,6 @@ async function runRealPiTui({
 
   const piArgs = buildPiArgs(model)
   if (runtimeApiKey) piArgs.push("--api-key", runtimeApiKey)
-  await rm("/tmp/tui", { recursive: true, force: true })
-
   const [command, args] = scriptCommand(outputFile, "pi", piArgs)
   const child = spawn(command, args, {
     detached: true,
@@ -238,7 +211,9 @@ async function runRealPiTui({
       NO_COLOR: "0",
       COLUMNS: "160",
       LINES: "40",
-      PI_TUI_DEBUG: "1",
+      // Pi's debug snapshots use shared /tmp/tui; capture only this child.
+      PI_TUI_DEBUG: "0",
+      PI_TUI_WRITE_LOG: tuiLogFile,
       PI_CHATGPT_FAST: "0",
       PI_CHATGPT_SPEED: "standard",
       ...extraEnv,
@@ -246,15 +221,12 @@ async function runRealPiTui({
   })
 
   try {
-    let output = await waitForOutput(
-      outputFile,
-      waitFor,
-      timeoutMs,
-      readTuiDebugOutput,
+    let output = await waitForOutput(outputFile, waitFor, timeoutMs, () =>
+      readIfExists(tuiLogFile),
     )
     if (settleMs > 0) {
       await new Promise((resolveWait) => setTimeout(resolveWait, settleMs))
-      output = `${await readIfExists(outputFile)}\n${await readTuiDebugOutput()}`
+      output = `${await readIfExists(outputFile)}\n${await readIfExists(tuiLogFile)}`
     }
     return { output, outputFile }
   } finally {
@@ -266,7 +238,6 @@ async function runRealPiTui({
       process.kill(-child.pid, "SIGKILL")
     } catch {}
     await rm(tempDir, { recursive: true, force: true })
-    await rm("/tmp/tui", { recursive: true, force: true })
   }
 }
 
@@ -322,6 +293,8 @@ async function runRealPiTuiExpect({
     LINES: "40",
     PI_CHATGPT_FAST: "0",
     PI_CHATGPT_SPEED: "standard",
+    PI_TUI_DEBUG: "0",
+    PI_TUI_WRITE_LOG: join(tempDir, "tui.log"),
     ...extraEnv,
   }
   const envLines = Object.entries(env)
@@ -539,6 +512,64 @@ test("parses usage snapshots and token metadata without a TUI", () => {
   assert.equal(snapshot.planType, "pro")
   assert.equal(snapshot.fiveHour.usedPercent, 25.4)
   assert.equal(snapshot.weekly.usedPercent, 42.2)
+})
+
+test("rejects malformed quota numbers without fabricating usage or resets", () => {
+  const validWindow = {
+    used_percent: 42.2,
+    limit_window_seconds: 604800,
+    reset_at: 1800000000,
+  }
+  const parseWindow = (window) =>
+    __test__.parseUsageSnapshot({
+      rate_limit: { primary_window: window },
+    }).weekly
+
+  // JSON permits exponents that overflow JavaScript's finite number range.
+  const overflow = JSON.parse("1e400")
+  for (const used_percent of [overflow, -overflow, NaN, -1, "42", null]) {
+    assert.equal(parseWindow({ ...validWindow, used_percent }), undefined)
+  }
+  for (const limit_window_seconds of [
+    overflow,
+    NaN,
+    -604800,
+    0,
+    604800.5,
+    "604800",
+    null,
+  ]) {
+    assert.equal(
+      parseWindow({ ...validWindow, limit_window_seconds }),
+      undefined,
+    )
+  }
+  for (const reset_at of [
+    overflow,
+    -overflow,
+    NaN,
+    -1,
+    1800000000.5,
+    Number.MAX_SAFE_INTEGER + 1,
+    "1800000000",
+    null,
+    undefined,
+  ]) {
+    const window = parseWindow({ ...validWindow, reset_at })
+    assert.equal(window.usedPercent, 42.2)
+    assert.equal(window.resetAt, undefined)
+    assert.equal(__test__.formatResetShort(window.resetAt), "?")
+    assert.equal(__test__.formatPacePercent(window), "?%")
+  }
+  for (const used_percent of [0, 42.2, 100, 105]) {
+    const window = parseWindow({ ...validWindow, used_percent })
+    assert.equal(window.usedPercent, used_percent)
+    assert.equal(window.resetAt, validWindow.reset_at)
+    assert.equal(
+      __test__.formatUsedPercent(window),
+      `${Math.round(Math.min(100, used_percent))}%`,
+    )
+  }
 })
 
 test("validates ChatGPT base URL before bearer token use", () => {

@@ -279,13 +279,23 @@ function normalizeWindow(value) {
   if (!record) return undefined
 
   const usedPercent =
-    typeof record.used_percent === "number" ? record.used_percent : undefined
+    typeof record.used_percent === "number" &&
+    Number.isFinite(record.used_percent) &&
+    record.used_percent >= 0
+      ? record.used_percent
+      : undefined
   const windowSeconds =
-    typeof record.limit_window_seconds === "number"
+    typeof record.limit_window_seconds === "number" &&
+    Number.isSafeInteger(record.limit_window_seconds) &&
+    record.limit_window_seconds > 0
       ? record.limit_window_seconds
       : undefined
   const resetAt =
-    typeof record.reset_at === "number" ? record.reset_at : undefined
+    typeof record.reset_at === "number" &&
+    Number.isSafeInteger(record.reset_at) &&
+    record.reset_at >= 0
+      ? record.reset_at
+      : undefined
 
   if (usedPercent === undefined || windowSeconds === undefined) return undefined
   return { usedPercent, windowSeconds, resetAt }
