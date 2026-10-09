@@ -112,7 +112,7 @@ The candidate schema comes from [OpenAI Codex's parser](https://github.com/opena
 
 - **Standard** sends no `service_tier` override.
 - **Fast** sends `service_tier: "priority"` for GPT-5.4, GPT-5.5, GPT-5.6 Sol (`gpt-5.6-sol`), GPT-5.6 Terra (`gpt-5.6-terra`), and GPT-5.6 Luna (`gpt-5.6-luna`).
-- **Ultrafast** sends `service_tier: "ultrafast"`; initially, only `gpt-6-astra` is enabled.
+- **Ultrafast** sends `service_tier: "ultrafast"` for GPT-6 Astra (`gpt-6-astra`) and GPT-6.1 Sol (`gpt-6.1-sol`), as supported by [OpenAI's Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode).
 
 ```txt
 /fast temporary [standard|fast|ultrafast]   Select for this session
@@ -127,7 +127,7 @@ Selection is not gated by reported plan metadata because eligible Enterprise and
 
 Accelerated modes can consume ChatGPT credits faster. OpenAI currently documents 2× Standard consumption for GPT-5.4 and 2.5× for GPT-5.5. For the GPT-5.6 models, OpenAI documents 1.5× speed and only “increased usage,” without an exact usage multiplier.
 
-The selected mode propagates to new subprocesses as `PI_CHATGPT_SPEED=standard|fast|ultrafast`. `PI_CHATGPT_FAST=1|0` remains the effective, model-aware compatibility signal (`1` for effective Fast or Ultrafast). Previous values are restored on shutdown. A temporary selection is not written to disk and is lost on reload, session replacement, or process exit.
+The selected mode propagates to new subprocesses as `PI_CHATGPT_SPEED=standard|fast|ultrafast`. `PI_CHATGPT_FAST=1|0` remains the effective, model-aware compatibility signal (`1` for effective Fast or Ultrafast). Selection survives model switches: unsupported models receive no override, but the selected speed remains available when switching back to a supported model. Child processes that inherit these variables and load this extension retain the selected speed even when they choose a different model, including Astra → Sol 6.1 Ultrafast. Previous values are restored on shutdown. A temporary selection is not written to disk and is lost on reload, session replacement, or process exit.
 
 ## Configuration and migration
 

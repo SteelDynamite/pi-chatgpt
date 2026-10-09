@@ -95,9 +95,16 @@ function scriptCommand(outputFile, command, args) {
   if (process.platform === "darwin")
     return ["script", ["-q", outputFile, command, ...args]]
 
+  // Polling needs each write flushed, not just full blocks or process exit.
   return [
     "script",
-    ["-q", "-c", [command, ...args].map(shellQuote).join(" "), outputFile],
+    [
+      "-q",
+      "-f",
+      "-c",
+      [command, ...args].map(shellQuote).join(" "),
+      outputFile,
+    ],
   ]
 }
 
@@ -632,17 +639,18 @@ test("normalizes config and formats percentages without a TUI", () => {
     { model: "gpt-6-astra", service_tier: "ultrafast" },
   )
   assert.equal(__test__.addFastServiceTier(null), undefined)
+  for (const provider of ["openai", "openai-codex", "openai-codex-2"]) {
+    for (const id of ["gpt-6-astra", "gpt-6.1-sol"]) {
+      assert.equal(__test__.isUltrafastSupportedModel({ provider, id }), true)
+    }
+    for (const id of ["gpt-5.5", "gpt-6-sol", "gpt-6.1-sol-pro"]) {
+      assert.equal(__test__.isUltrafastSupportedModel({ provider, id }), false)
+    }
+  }
   assert.equal(
     __test__.isUltrafastSupportedModel({
-      provider: "openai-codex",
-      id: "gpt-6-astra",
-    }),
-    true,
-  )
-  assert.equal(
-    __test__.isUltrafastSupportedModel({
-      provider: "openai-codex",
-      id: "gpt-5.5",
+      provider: "openrouter",
+      id: "gpt-6.1-sol",
     }),
     false,
   )
@@ -885,7 +893,7 @@ test("speed commands migrate config, patch tiers, report support, and manage inh
     )
     assert.match(
       notifications.at(-1).message,
-      /Not active: openai-codex\/gpt-5\.6-sol does not support Ultrafast mode.*gpt-6-astra only/,
+      /Not active: openai-codex\/gpt-5\.6-sol does not support Ultrafast mode.*gpt-6-astra and gpt-6\.1-sol only/,
     )
     assert.equal(notifications.at(-1).type, "warning")
 
@@ -958,16 +966,35 @@ test("speed commands migrate config, patch tiers, report support, and manage inh
       },
       registerCommand() {},
     })
-    ctx.model = { provider: "openai-codex", id: "gpt-6-astra" }
+    ctx.model = { provider: "openai", id: "gpt-6.1-sol" }
     await childHandlers.get("session_start")?.({}, ctx)
-    assert.equal(process.env.PI_CHATGPT_FAST, "1")
+    // The inherited selection beats both legacy FAST=0 and persisted Standard.
+    for (const id of [
+      "gpt-6.1-sol",
+      "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6.1-sol-pro",
+      "gpt-6.1-sol",
+    ]) {
+      ctx.model.id = id
+      childHandlers.get("model_select")({ model: ctx.model }, ctx)
+      const supported = id === "gpt-6-astra" || id === "gpt-6.1-sol"
+      assert.equal(process.env.PI_CHATGPT_FAST, supported ? "1" : "0")
+      assert.equal(process.env.PI_CHATGPT_SPEED, "ultrafast")
+      const payload = { model: id, service_tier: "default" }
+      assert.deepEqual(
+        childHandlers.get("before_provider_request")({ payload }, ctx),
+        supported ? { ...payload, service_tier: "ultrafast" } : undefined,
+      )
+      assert.equal(payload.service_tier, "default")
+    }
+    ctx.modelRegistry.isUsingOAuth = () => false
+    childHandlers.get("model_select")({ model: ctx.model }, ctx)
+    assert.equal(process.env.PI_CHATGPT_FAST, "0")
     assert.equal(process.env.PI_CHATGPT_SPEED, "ultrafast")
-    assert.deepEqual(
-      childHandlers.get("before_provider_request")?.(
-        { payload: { model: "gpt-6-astra" } },
-        ctx,
-      ),
-      { model: "gpt-6-astra", service_tier: "ultrafast" },
+    assert.equal(
+      childHandlers.get("before_provider_request")({ payload: {} }, ctx),
+      undefined,
     )
     await childHandlers.get("session_shutdown")?.({}, ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "0")
@@ -1034,7 +1061,7 @@ test("unified openai OAuth supports speed modes and usage, but API keys do not",
     mode: "rpc",
     model: {
       provider: "openai",
-      id: "gpt-6-astra",
+      id: "gpt-6.1-sol",
       api: "openai-responses",
       baseUrl: "https://api.openai.com/v1",
       reasoning: true,
@@ -1096,7 +1123,7 @@ test("unified openai OAuth supports speed modes and usage, but API keys do not",
       notifications.at(-1).message,
       "ChatGPT speed: Ultrafast (active).",
     )
-    const payload = { model: "gpt-6-astra", service_tier: "default" }
+    const payload = { model: "gpt-6.1-sol", service_tier: "default" }
     assert.deepEqual(
       handlers.get("before_provider_request")({ payload }, ctx),
       {
@@ -1144,6 +1171,7 @@ test("unified openai OAuth supports speed modes and usage, but API keys do not",
     oauth = false
     for (const [id, mode] of [
       ["gpt-6-astra", "ultrafast"],
+      ["gpt-6.1-sol", "ultrafast"],
       ["gpt-5.5", "fast"],
     ]) {
       ctx.model.id = id
@@ -1351,18 +1379,18 @@ test(
 )
 
 test(
-  "real pi unified openai Astra distinguishes OAuth from a runtime API key",
+  "real pi unified openai Sol 6.1 inherits Ultrafast only with OAuth",
   { skip: SCRIPT_SKIP },
   async () => {
     const token = fakeJwt({
-      "https://api.openai.com/auth": { chatgpt_account_id: "acct_astra" },
+      "https://api.openai.com/auth": { chatgpt_account_id: "acct_sol" },
     })
     const server = await startUsageServer((_req, res) => sendUsageResponse(res))
     try {
       const options = {
         baseUrl: server.baseUrl,
         apiKey: token,
-        model: "gpt-6-astra",
+        model: "gpt-6.1-sol",
         extraEnv: { PI_CHATGPT_SPEED: "ultrafast" },
       }
       const { output } = await runRealPiTui({
@@ -1378,10 +1406,10 @@ test(
       const apiKeyRun = await runRealPiTui({
         ...options,
         runtimeApiKey: "test-api-key",
-        waitFor: (text) => stripAnsi(text).includes("gpt-6-astra"),
+        waitFor: (text) => stripAnsi(text).includes("gpt-6.1-sol"),
         settleMs: 500,
       })
-      assert.match(stripAnsi(apiKeyRun.output), /gpt-6-astra/)
+      assert.match(stripAnsi(apiKeyRun.output), /gpt-6\.1-sol/)
       assert.doesNotMatch(stripAnsi(apiKeyRun.output), /Ultrafast|W 42%/)
       assert.equal(server.requests.length, requestCount)
     } finally {
