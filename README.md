@@ -34,6 +34,12 @@ pi --no-extensions --extension ./index.js
 
 When upgrading from `pi-chatgpt-limit`, remove the old package after installing this one. Loading both packages causes duplicate commands, requests, and footer replacements.
 
+## Compatibility
+
+The integration target is Pi 0.99.1 and newer. CI exercises exact Pi 0.99.1 and 1.1.0 hosts on Node 24, including interactive footer and command tests with synthetic OAuth credentials and a local usage server. Older hosts such as 0.79.6 predate the unified `openai` OAuth integration and are not covered by that support target. This test matrix does not upgrade your installed Pi, change runtime APIs, remove legacy `openai-codex` provider handling, or establish live usage-endpoint access.
+
+Local type declarations and mocked diagnostic tests are not substitutes for host integration coverage. The passive diagnostic's provider-hook delivery is not yet exercised through a real provider stream in CI.
+
 ## Usage limits
 
 The footer percentage appears only while using an `openai` model authenticated with **ChatGPT OAuth** through pi's `/login` flow. Legacy `openai-codex` providers remain supported. API-key authentication does not enable ChatGPT usage fetching.
@@ -55,7 +61,7 @@ This shows and configures:
 
 In interactive Pi, usage refreshes on session start, model changes, and completed agent runs, independently of the selected speed mode. `/chatgpt` → “Show current usage details” also refreshes it manually, including after `/login`. Pi resolves the effective credential and refreshes expiring OAuth tokens before each usage request.
 
-Some plans return only a weekly window. With “Both” selected, the footer shows whichever windows the endpoint provides; a missing 5-hour window does not hide weekly usage.
+Some plans return only a weekly window. With “Both” selected, the footer shows whichever windows the endpoint provides; a missing 5-hour window does not hide weekly usage. Windows containing nonfinite numeric quota values or reset timestamps that overflow millisecond conversion are ignored, not treated as zero usage. Missing reset times remain unknown.
 
 If the usage endpoint rejects a request, the footer shows a safe status such as `Usage: HTTP 401` (unless hidden), and `/chatgpt` reports the HTTP status. Server error bodies and credentials are never displayed. Successful refreshes replace the error with usage again.
 
@@ -97,8 +103,10 @@ pi --continue --extension ./repos/pi-chatgpt/extensions/quota-diagnostic.js
 
 Capture stops at the next provider request or `agent_end`, so tool continuations are excluded. Model changes, reload, and shutdown clear it. The diagnostic makes no requests, resolves no credentials, changes no request data, and writes no files or session entries. It retains only hook counts and these allowlisted fields in memory, displayed on demand:
 
-- Headers: `x-codex-{primary,secondary}-{used-percent,window-minutes,reset-at}`.
+- Headers: `x-codex-{primary,secondary}-{used-percent,window-minutes,reset-at}` (latest response only, including an empty response).
 - Events with type exactly `codex.rate_limits`: `rate_limits.{primary,secondary}.{used_percent,window_minutes,reset_at}` (latest event only).
+
+A single logical request can produce multiple response hooks during retries. Header values are replaced, never merged across responses; hook counts remain cumulative. The latest quota event is retained independently, so it is not guaranteed to describe the same attempt as the latest headers.
 
 Values must be finite nonnegative numbers; window minutes and Unix reset seconds must be safe integers. Header numeric strings are converted to numbers. Malformed values appear only as `"invalid"`; missing fields are omitted, not interpreted as zero. Credentials, account identifiers, plan metadata, content, bodies, other events, and complete headers are never retained or displayed.
 
@@ -148,6 +156,8 @@ GET https://chatgpt.com/backend-api/wham/usage
 ```
 
 The request uses the OAuth token resolved by pi for the active `openai` (or legacy `openai-codex`) provider. Authentication is checked through pi's model registry, not inferred from the model's API type, base URL, or token contents. By default, bearer tokens are sent only to HTTPS URLs on the `https://chatgpt.com` origin.
+
+Account details, displayed model/provider names, and project/session labels have terminal escape sequences and control characters removed before rendering. Provider-bound identifiers and payloads are unchanged; trusted extension status styling is preserved.
 
 `CHATGPT_BASE_URL` can override the endpoint path on that origin. To use a non-ChatGPT testing or proxy URL, set `CHATGPT_TRUST_CUSTOM_BASE_URL=1` only for trusted infrastructure. The legacy `CHATGPT_LIMIT_TRUST_CUSTOM_BASE_URL` name remains supported.
 

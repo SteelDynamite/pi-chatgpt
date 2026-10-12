@@ -8,6 +8,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { stripVTControlCharacters } from "node:util"
 
 import {
   Key,
@@ -87,8 +88,16 @@ const DISPLAY_MODE_OPTIONS = [
 let usageSnapshot
 let footerConfig = { ...DEFAULT_FOOTER_CONFIG }
 let persistentSpeedMode = STANDARD_MODE
-let refreshTimer
 let requestRender = () => {}
+
+/** @param {string} value */
+function terminalText(value) {
+  // Strip recognized escapes and remaining C0/C1 controls, including partial escapes.
+  return stripVTControlCharacters(value).replace(
+    /[\u0000-\u001f\u007f-\u009f]/g,
+    "",
+  )
+}
 
 /** @param {string | undefined} value */
 function parseBooleanEnv(value) {
@@ -287,7 +296,14 @@ function normalizeWindow(value) {
   const resetAt =
     typeof record.reset_at === "number" ? record.reset_at : undefined
 
-  if (usedPercent === undefined || windowSeconds === undefined) return undefined
+  if (
+    usedPercent === undefined ||
+    !Number.isFinite(usedPercent) ||
+    windowSeconds === undefined ||
+    !Number.isFinite(windowSeconds) ||
+    (resetAt !== undefined && !Number.isFinite(resetAt * 1000))
+  )
+    return undefined
   return { usedPercent, windowSeconds, resetAt }
 }
 
@@ -683,7 +699,7 @@ function renderFooter(
     statsLeftWidth = visibleWidth(statsLeft)
   }
 
-  const modelName = model?.id || "no-model"
+  const modelName = terminalText(model?.id || "no-model")
   let rightSideWithoutProvider = modelName
   if (model?.reasoning) {
     const thinkingLevel = pi.getThinkingLevel ? pi.getThinkingLevel() : "off"
@@ -709,7 +725,7 @@ function renderFooter(
 
   let rightSide = rightSideWithoutProvider
   if (footerData.getAvailableProviderCount() > 1 && model) {
-    rightSide = `(${model.provider}) ${rightSideWithoutProvider}`
+    rightSide = `(${terminalText(model.provider)}) ${rightSideWithoutProvider}`
     if (statsLeftWidth + 2 + visibleWidth(rightSide) > width)
       rightSide = rightSideWithoutProvider
   }
@@ -737,7 +753,7 @@ function renderFooter(
     }
   }
 
-  const dimPwd = theme.fg("dim", pwd)
+  const dimPwd = theme.fg("dim", terminalText(pwd))
   const dimEllipsis = theme.fg("dim", "...")
   let pwdLine = truncateToWidth(dimPwd, width, dimEllipsis)
   const extensionStatuses =
@@ -879,7 +895,7 @@ function buildUsageDetails(snapshot, provider) {
         : `disabled (${CHATGPT_BASE_URL_RESULT.reason})`
     }`,
   )
-  return lines
+  return lines.map(terminalText)
 }
 
 async function selectFooterConfigOptionFallback(
@@ -1206,8 +1222,6 @@ export default function (pi) {
   })
 
   pi.on("session_shutdown", async () => {
-    if (refreshTimer) clearInterval(refreshTimer)
-    refreshTimer = undefined
     requestRender = () => {}
     restoreSpeedEnvironment()
   })
@@ -1239,7 +1253,7 @@ export default function (pi) {
       if (tokens.length === 1 && tokens[0] === "status") {
         const label = SPEED_MODE_LABELS[speedMode]
         const modelName = ctx.model
-          ? `${ctx.model.provider}/${ctx.model.id}`
+          ? terminalText(`${ctx.model.provider}/${ctx.model.id}`)
           : "the current model"
         const state =
           speedMode === STANDARD_MODE
@@ -1302,7 +1316,7 @@ export default function (pi) {
             " Not active: requires ChatGPT OAuth via /login on openai or legacy openai-codex."
         } else {
           const modelName = ctx.model
-            ? `${ctx.model.provider}/${ctx.model.id}`
+            ? terminalText(`${ctx.model.provider}/${ctx.model.id}`)
             : "the current model"
           message += ` Not active: ${modelName} does not support ${SPEED_MODE_LABELS[speedMode]} mode.`
           if (speedMode === ULTRAFAST_MODE)

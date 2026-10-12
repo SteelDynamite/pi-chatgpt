@@ -154,6 +154,35 @@ test("malformed quota values cannot leak remote text; absence is not zero", asyn
   assert.match(h.notifications.at(-1), /diagnostic: done/)
 })
 
+test("retry responses replace headers, including empty or malformed responses", async (t) => {
+  const h = harness(t)
+  await h.command("arm")
+  await h.emit("before_provider_request")
+  await h.emit("after_provider_response", {
+    headers: { "x-codex-primary-used-percent": "12" },
+  })
+  await h.emit("after_provider_response", {
+    headers: { "x-codex-secondary-used-percent": "42" },
+  })
+  assert.deepEqual((await h.report()).headers, {
+    "x-codex-secondary-used-percent": 42,
+  })
+  await h.emit("after_provider_response", { headers: {} })
+  assert.deepEqual((await h.report()).headers, {})
+  await h.emit("after_provider_response", {
+    headers: { "x-codex-primary-used-percent": "13" },
+  })
+  await h.emit("after_provider_response", { headers: null })
+  const report = await h.report()
+  assert.deepEqual(report.headers, {})
+  assert.equal(report.responseHooks, 5)
+  await h.emit("before_provider_request")
+  await h.emit("after_provider_response", {
+    headers: { "x-codex-primary-used-percent": "99" },
+  })
+  assert.deepEqual(await h.report(), report)
+})
+
 test("OAuth eligibility, routing, idle guard, and lifecycle clearing", async (t) => {
   const h = harness(t)
   h.ctx.modelRegistry.isUsingOAuth = () => false

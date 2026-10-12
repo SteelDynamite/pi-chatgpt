@@ -91,6 +91,8 @@ export default function (pi) {
   pi.on("after_provider_response", (event, ctx) => {
     if (phase !== "capturing" || !eligible(ctx)) return
     report.responseHooks++
+    // Retries may emit several responses for one payload; retain only the latest.
+    report.headers = {}
     const headers = record(event.headers)
     // Pi normalizes response header keys to lowercase. Do not enumerate them.
     for (const window of ["primary", "secondary"]) {

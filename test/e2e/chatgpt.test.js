@@ -2,14 +2,7 @@ import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
 import { once } from "node:events"
 import { existsSync } from "node:fs"
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import http from "node:http"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -113,41 +106,17 @@ async function readIfExists(path) {
   return readFile(path, "utf8")
 }
 
-function stripEscapedAnsi(value) {
-  return String(value)
-    .replace(/\\u001b\][^\n]*?\\u0007/g, "")
-    .replace(/\\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-}
-
-async function readTuiDebugOutput() {
-  try {
-    const files = await readdir("/tmp/tui")
-    const contents = await Promise.all(
-      files.map((file) => readIfExists(join("/tmp/tui", file))),
-    )
-    const output = contents.join("\n")
-    return `${output}\n${stripEscapedAnsi(output)}`
-  } catch {
-    return ""
-  }
-}
-
-async function waitForOutput(
-  path,
-  predicate,
-  timeoutMs = 8000,
-  readExtraOutput = async () => "",
-) {
+async function waitForOutput(path, predicate, timeoutMs = 8000) {
   const startedAt = Date.now()
   let output = ""
 
   while (Date.now() - startedAt < timeoutMs) {
-    output = `${await readIfExists(path)}\n${await readExtraOutput()}`
+    output = await readIfExists(path)
     if (predicate(output)) return output
     await new Promise((resolveWait) => setTimeout(resolveWait, 100))
   }
 
-  return output
+  assert.fail(`Timed out after ${timeoutMs}ms waiting for output:\n${output}`)
 }
 
 function tclDoubleQuote(value) {
@@ -173,7 +142,7 @@ function stripAnsi(value) {
     .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
 }
 
-function buildPiArgs(model = "gpt-5.5") {
+function buildPiArgs(model = "gpt-5.5", provider = "openai") {
   return [
     "--no-extensions",
     "--no-skills",
@@ -185,7 +154,7 @@ function buildPiArgs(model = "gpt-5.5") {
     "--extension",
     EXTENSION_PATH,
     "--provider",
-    "openai",
+    provider,
     "--model",
     model,
   ]
@@ -195,6 +164,7 @@ async function runRealPiTui({
   baseUrl,
   apiKey,
   model = "gpt-5.5",
+  provider = "openai",
   runtimeApiKey,
   extraEnv = {},
   initialConfig,
@@ -212,7 +182,7 @@ async function runRealPiTui({
   await writeFile(
     join(agentDir, "auth.json"),
     `${JSON.stringify({
-      openai: {
+      [provider]: {
         type: "oauth",
         access: apiKey,
         refresh: "test-refresh-token",
@@ -227,9 +197,8 @@ async function runRealPiTui({
     )
   }
 
-  const piArgs = buildPiArgs(model)
+  const piArgs = buildPiArgs(model, provider)
   if (runtimeApiKey) piArgs.push("--api-key", runtimeApiKey)
-  await rm("/tmp/tui", { recursive: true, force: true })
 
   const [command, args] = scriptCommand(outputFile, "pi", piArgs)
   const child = spawn(command, args, {
@@ -245,7 +214,9 @@ async function runRealPiTui({
       NO_COLOR: "0",
       COLUMNS: "160",
       LINES: "40",
-      PI_TUI_DEBUG: "1",
+      // Assertions use only this child's owned PTY transcript.
+      PI_TUI_DEBUG: "0",
+      PI_TUI_WRITE_LOG: "",
       PI_CHATGPT_FAST: "0",
       PI_CHATGPT_SPEED: "standard",
       ...extraEnv,
@@ -253,15 +224,10 @@ async function runRealPiTui({
   })
 
   try {
-    let output = await waitForOutput(
-      outputFile,
-      waitFor,
-      timeoutMs,
-      readTuiDebugOutput,
-    )
+    let output = await waitForOutput(outputFile, waitFor, timeoutMs)
     if (settleMs > 0) {
       await new Promise((resolveWait) => setTimeout(resolveWait, settleMs))
-      output = `${await readIfExists(outputFile)}\n${await readTuiDebugOutput()}`
+      output = await readIfExists(outputFile)
     }
     return { output, outputFile }
   } finally {
@@ -273,7 +239,6 @@ async function runRealPiTui({
       process.kill(-child.pid, "SIGKILL")
     } catch {}
     await rm(tempDir, { recursive: true, force: true })
-    await rm("/tmp/tui", { recursive: true, force: true })
   }
 }
 
@@ -327,6 +292,8 @@ async function runRealPiTuiExpect({
     NO_COLOR: "0",
     COLUMNS: "160",
     LINES: "40",
+    PI_TUI_DEBUG: "0",
+    PI_TUI_WRITE_LOG: "",
     PI_CHATGPT_FAST: "0",
     PI_CHATGPT_SPEED: "standard",
     ...extraEnv,
@@ -391,6 +358,29 @@ close
     await rm(tempDir, { recursive: true, force: true })
   }
 }
+
+test("waitForOutput rejects missing or unmatched output on timeout", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-chatgpt-poll-"))
+  const outputFile = join(tempDir, "output.log")
+  try {
+    await assert.rejects(
+      waitForOutput(outputFile, (text) => text.includes("ready"), 20),
+      /Timed out after 20ms waiting for output/,
+    )
+    await writeFile(outputFile, "starting")
+    await assert.rejects(
+      waitForOutput(outputFile, (text) => text.includes("ready"), 20),
+      /Timed out after 20ms waiting for output:\nstarting/,
+    )
+    await writeFile(outputFile, "ready")
+    assert.equal(
+      await waitForOutput(outputFile, (text) => text.includes("ready"), 20),
+      "ready",
+    )
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+})
 
 test("skips automatic footer and usage work outside TUI mode", async () => {
   const originalAgentDir = process.env.PI_CODING_AGENT_DIR
@@ -1379,6 +1369,33 @@ test(
 )
 
 test(
+  "real pi preserves legacy openai-codex OAuth usage support",
+  { skip: SCRIPT_SKIP },
+  async () => {
+    const token = fakeJwt({
+      "https://api.openai.com/auth": { chatgpt_account_id: "acct_legacy" },
+    })
+    const server = await startUsageServer((req, res) => {
+      assert.equal(req.headers.authorization, `Bearer ${token}`)
+      sendUsageResponse(res)
+    })
+    try {
+      const { output } = await runRealPiTui({
+        baseUrl: server.baseUrl,
+        apiKey: token,
+        provider: "openai-codex",
+        model: "gpt-5.4",
+        waitFor: (text) => stripAnsi(text).includes("W 42%"),
+      })
+      assert.match(stripAnsi(output), /gpt-5\.4/)
+      assert.ok(server.requests.length > 0)
+    } finally {
+      await server.close()
+    }
+  },
+)
+
+test(
   "real pi unified openai Sol 6.1 inherits Ultrafast only with OAuth",
   { skip: SCRIPT_SKIP },
   async () => {
@@ -1497,8 +1514,12 @@ test(
     const token = fakeJwt({
       "https://api.openai.com/auth": { chatgpt_account_id: "acct_global" },
     })
-    const server = await startUsageServer((_req, res) => {
+    let successfulResponses = 0
+    const server = await startUsageServer((req, res) => {
+      assert.equal(req.url, "/backend-api/wham/usage")
+      assert.equal(req.headers.authorization, `Bearer ${token}`)
       sendUsageResponse(res)
+      successfulResponses++
     })
 
     try {
@@ -1515,17 +1536,21 @@ test(
       })
 
       await t.test("hidden display", async () => {
-        const requestCount = server.requests.length
+        const responseCount = successfulResponses
         const { output } = await runRealPiTui({
           baseUrl: server.baseUrl,
           apiKey: token,
           initialConfig: { quotaWindow: "hidden", displayMode: "used" },
           waitFor: (text) =>
-            server.requests.length > requestCount &&
-            stripAnsi(text).includes("gpt-5.5"),
+            successfulResponses > responseCount &&
+            stripAnsi(text).includes("gpt-5.5") &&
+            stripAnsi(text).includes("(sub)"),
           settleMs: 500,
         })
 
+        assert.match(stripAnsi(output), /gpt-5\.5/)
+        assert.match(stripAnsi(output), /\(sub\)/)
+        assert.ok(successfulResponses > responseCount)
         assert.doesNotMatch(stripAnsi(output), /W 42%|5h 25%/)
       })
     } finally {
@@ -1558,13 +1583,22 @@ test(
         initialConfig: defaultConfig,
         expectedConfig: defaultConfig,
         expectedConfigWritten: false,
+        // Match the footer's separator, not the identical example in the menu.
         scriptBody: `${expectBlock("Configure footer display mode")}
 send "${expectSendLiteral(displayModeMenu)}"
 ${expectBlock("How should the footer value be shown?")}
 send "${expectSendLiteral(down)}"
-${expectBlock("W 42% · ~2d")}
+expect {
+  -re ${tclDoubleQuote("• (?:\\x1b\\[[0-9;]*m)*W 42% · ~2d")} {}
+  timeout { exit 1 }
+  eof { exit 1 }
+}
 send "${expectSendLiteral(escape)}"
-${expectBlock("gpt-5.5")}`,
+expect {
+  -re ${tclDoubleQuote("• (?:\\x1b\\[[0-9;]*m)*W 42%\\x1b")} {}
+  timeout { exit 1 }
+  eof { exit 1 }
+}`,
       })
       const previewText = stripAnsi(previewOutput)
       const previewIndex = previewText.lastIndexOf("W 42% · ~2d")
