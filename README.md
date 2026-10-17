@@ -36,13 +36,15 @@ When upgrading from `pi-chatgpt-limit`, remove the old package after installing 
 
 ## Compatibility
 
-The integration target is Pi 0.99.1 and newer. CI exercises exact Pi 0.99.1 and 1.1.0 hosts on Node 24, including interactive footer and command tests with synthetic OAuth credentials and a local usage server. Older hosts such as 0.79.6 predate the unified `openai` OAuth integration and are not covered by that support target. This test matrix does not upgrade your installed Pi, change runtime APIs, remove legacy `openai-codex` provider handling, or establish live usage-endpoint access.
+The integration target is Pi 0.99.1 and newer. CI exercises exact Pi 0.99.1 and 1.1.0 hosts on Node 24, including interactive footer and command tests with synthetic OAuth credentials and a local usage server. Older hosts such as 0.79.6 predate the unified `openai` OAuth integration and are not covered by that support target. This test matrix does not upgrade your installed Pi, change runtime APIs, or establish live usage-endpoint access.
+
+Only the unified `openai` provider is supported. Obsolete `openai-codex` and numbered variants such as `openai-codex-2` receive no usage requests, speed overrides, or passive diagnostic capture. Select an `openai` model and use its ChatGPT OAuth option in `/login`; do not copy or relabel old credentials. Transport API IDs such as `openai-codex-responses` are distinct from provider IDs and are not rewritten.
 
 Local type declarations and mocked diagnostic tests are not substitutes for host integration coverage. The passive diagnostic's provider-hook delivery is not yet exercised through a real provider stream in CI.
 
 ## Usage limits
 
-The footer percentage appears only while using an `openai` model authenticated with **ChatGPT OAuth** through pi's `/login` flow. Legacy `openai-codex` providers remain supported. API-key authentication does not enable ChatGPT usage fetching.
+The footer percentage appears only while using an `openai` model authenticated with **ChatGPT OAuth** through pi's `/login` flow. API-key authentication does not enable ChatGPT usage fetching.
 
 Run:
 
@@ -65,7 +67,7 @@ Some plans return only a weekly window. With “Both” selected, the footer sho
 
 If the usage endpoint rejects a request, the footer shows a safe status such as `Usage: HTTP 401` (unless hidden), and `/chatgpt` reports the HTTP status. Server error bodies and credentials are never displayed. Successful refreshes replace the error with usage again.
 
-ChatGPT OAuth access to model requests does not guarantee access to the separate usage endpoint. A 401 means the usage request was rejected, not that the footer needs reloading; resolving it requires checking credential compatibility with that endpoint.
+**Direct OAuth quota remains upstream-blocked.** As checked on 2026-10-12, OpenAI [does not support remaining-quota access for direct-use OAuth](https://github.com/openai/sign-in-with-chatgpt-devkit/issues/3#issuecomment-5936080960). The existing usage probe returned HTTP 401 with that grant. Use [ChatGPT Settings → Usage](https://chatgpt.com/settings/usage); reloading or changing provider names does not fix endpoint authorization. No separate legacy login, Codex installation, or guessed endpoint is a supported workaround.
 
 Examples:
 
@@ -112,7 +114,7 @@ Values must be finite nonnegative numbers; window minutes and Unix reset seconds
 
 The candidate schema comes from [OpenAI Codex's parser](https://github.com/openai/codex/blob/main/codex-rs/codex-api/src/rate_limits.rs). Pi 0.99.1 exposes `after_provider_response` before stream consumption and `provider_stream_event` before normalization. This does **not** confirm that public-API OAuth responses include Codex quota metadata. Empty quota objects with positive hook counts mean those fields were not observed; zero hook counts mean no eligible hook was observed, not zero usage. The response hook lacks model identity, so it is gated by the active model's OAuth status; stream events additionally must match that model. No quota-to-footer mapping is enabled without live evidence.
 
-**Observed limitation (Pi 0.99.1):** one user-reported normal request on `openai` with direct-use ChatGPT OAuth returned `responseHooks=1`, `streamHooks=30`, `quotaEvents=0`, `headers={}`, and `streamQuota={}`. The hooks fired, but this request exposed no allowlisted quota metadata. Together with the usage endpoint's previously observed HTTP 401 for that credential, there is currently no verified path to restore numeric quota display for it. This is evidence from one request, not proof that every credential or future response lacks quota metadata; it does not mean usage is zero. Check the official [Codex usage settings](https://chatgpt.com/codex/settings/usage) for account usage.
+**Observed limitation (Pi 0.99.1):** one user-reported normal request on `openai` with direct-use ChatGPT OAuth returned `responseHooks=1`, `streamHooks=30`, `quotaEvents=0`, `headers={}`, and `streamQuota={}`. The hooks fired, but this request exposed no allowlisted quota metadata. Together with the usage endpoint's previously observed HTTP 401 for that credential, there is currently no verified path to restore numeric quota display for it. This is evidence from one request, not proof that every credential or future response lacks quota metadata; it does not mean usage is zero. Check [ChatGPT Settings → Usage](https://chatgpt.com/settings/usage) for account usage.
 
 ## Speed modes
 
@@ -129,7 +131,7 @@ The candidate schema comes from [OpenAI Codex's parser](https://github.com/opena
 /fast status                                Show selected and effective mode
 ```
 
-Omitting the mode from `temporary` or `persistent` still selects Fast, preserving the existing commands. Fast and Ultrafast require ChatGPT OAuth on `openai` (or legacy `openai-codex`); API-key sessions receive no override. Unsupported models receive no override and the command reports why. The footer shows `Fast` or `Ultrafast` only when the selected mode is effective for the active model.
+Omitting the mode from `temporary` or `persistent` still selects Fast, preserving the existing commands. Fast and Ultrafast require ChatGPT OAuth on `openai`; API-key sessions receive no override. Unsupported models receive no override and the command reports why. The footer shows `Fast` or `Ultrafast` only when the selected mode is effective for the active model.
 
 Selection is not gated by reported plan metadata because eligible Enterprise and Edu accounts may qualify. OpenAI remains responsible for account eligibility and can reject an unavailable tier.
 
@@ -155,7 +157,9 @@ Usage is fetched from:
 GET https://chatgpt.com/backend-api/wham/usage
 ```
 
-The request uses the OAuth token resolved by pi for the active `openai` (or legacy `openai-codex`) provider. Authentication is checked through pi's model registry, not inferred from the model's API type, base URL, or token contents. By default, bearer tokens are sent only to HTTPS URLs on the `https://chatgpt.com` origin.
+The request uses the OAuth token resolved by pi for the active `openai` provider. Authentication is checked through pi's model registry, not inferred from the model's API type, base URL, or token contents. By default, bearer tokens are sent only to HTTPS URLs on the `https://chatgpt.com` origin.
+
+Known credential-safety limitation: the registry's cached OAuth check is not bound to the exact fresh credential returned by `getApiKeyAndHeaders`. A concurrent change from OAuth to an API key can pass that check and send the key to the usage endpoint. Restricting provider IDs does not resolve this provenance race.
 
 Account details, displayed model/provider names, and project/session labels have terminal escape sequences and control characters removed before rendering. Provider-bound identifiers and payloads are unchanged; trusted extension status styling is preserved.
 

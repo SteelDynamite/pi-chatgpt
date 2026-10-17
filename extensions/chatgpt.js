@@ -152,11 +152,7 @@ function resolveChatGptBaseUrl(value, trustCustomBaseUrl = false) {
 
 /** @param {string | undefined} provider */
 function isChatGptProvider(provider) {
-  return (
-    provider === "openai" ||
-    provider === "openai-codex" ||
-    /^openai-codex-\d+$/.test(provider || "")
-  )
+  return provider === "openai"
 }
 
 function isChatGptModel(model, modelRegistry) {
@@ -1166,7 +1162,7 @@ export default function (pi) {
 
     if (!isChatGptModel(ctx.model, ctx.modelRegistry)) {
       ctx.ui.notify(
-        "ChatGPT limits require an openai (or legacy openai-codex) model authenticated with ChatGPT OAuth via /login.",
+        "ChatGPT limits require an openai model authenticated with ChatGPT OAuth via /login.",
         "info",
       )
       return
@@ -1259,7 +1255,7 @@ export default function (pi) {
           speedMode === STANDARD_MODE
             ? "active"
             : !isChatGptModel(ctx.model, ctx.modelRegistry)
-              ? "selected; requires ChatGPT OAuth via /login on openai or legacy openai-codex"
+              ? "selected; requires ChatGPT OAuth via /login on openai"
               : isSpeedModeSupported(ctx.model, speedMode, ctx.modelRegistry)
                 ? "active"
                 : `selected; unsupported by ${modelName}`
@@ -1312,8 +1308,7 @@ export default function (pi) {
         !isSpeedModeSupported(ctx.model, speedMode, ctx.modelRegistry)
       ) {
         if (!isChatGptModel(ctx.model, ctx.modelRegistry)) {
-          message +=
-            " Not active: requires ChatGPT OAuth via /login on openai or legacy openai-codex."
+          message += " Not active: requires ChatGPT OAuth via /login on openai."
         } else {
           const modelName = ctx.model
             ? terminalText(`${ctx.model.provider}/${ctx.model.id}`)

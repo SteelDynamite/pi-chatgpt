@@ -24,11 +24,8 @@ function quotaNumber(value, integer) {
 }
 
 function eligible(ctx) {
-  const provider = ctx.model?.provider
   return (
-    (provider === "openai" ||
-      provider === "openai-codex" ||
-      /^openai-codex-\d+$/.test(provider || "")) &&
+    ctx.model?.provider === "openai" &&
     ctx.modelRegistry.isUsingOAuth(ctx.model)
   )
 }
@@ -44,7 +41,7 @@ export default function (pi) {
         case "arm":
           if (!ctx.isIdle() || !eligible(ctx)) {
             ctx.ui.notify(
-              "Wait until idle and select an OpenAI model using ChatGPT OAuth via /login.",
+              "Wait until idle and select an openai model using ChatGPT OAuth via /login.",
               "warning",
             )
             return

@@ -142,7 +142,7 @@ function stripAnsi(value) {
     .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
 }
 
-function buildPiArgs(model = "gpt-5.5", provider = "openai") {
+function buildPiArgs(model = "gpt-5.5") {
   return [
     "--no-extensions",
     "--no-skills",
@@ -154,7 +154,7 @@ function buildPiArgs(model = "gpt-5.5", provider = "openai") {
     "--extension",
     EXTENSION_PATH,
     "--provider",
-    provider,
+    "openai",
     "--model",
     model,
   ]
@@ -164,7 +164,6 @@ async function runRealPiTui({
   baseUrl,
   apiKey,
   model = "gpt-5.5",
-  provider = "openai",
   runtimeApiKey,
   extraEnv = {},
   initialConfig,
@@ -182,7 +181,7 @@ async function runRealPiTui({
   await writeFile(
     join(agentDir, "auth.json"),
     `${JSON.stringify({
-      [provider]: {
+      openai: {
         type: "oauth",
         access: apiKey,
         refresh: "test-refresh-token",
@@ -197,7 +196,7 @@ async function runRealPiTui({
     )
   }
 
-  const piArgs = buildPiArgs(model, provider)
+  const piArgs = buildPiArgs(model)
   if (runtimeApiKey) piArgs.push("--api-key", runtimeApiKey)
 
   const [command, args] = scriptCommand(outputFile, "pi", piArgs)
@@ -402,7 +401,7 @@ test("skips automatic footer and usage work outside TUI mode", async () => {
 
       const ctx = {
         mode,
-        model: { provider: "openai-codex", id: "gpt-5.5" },
+        model: { provider: "openai", id: "gpt-5.5" },
         modelRegistry: {
           isUsingOAuth: () => true,
           getApiKeyAndHeaders: async () => {
@@ -461,7 +460,7 @@ test("installs footer when ctx.mode is unavailable but process looks interactive
     })
 
     const ctx = {
-      model: { provider: "openai-codex", id: "gpt-5.5" },
+      model: { provider: "openai", id: "gpt-5.5" },
       modelRegistry: {
         isUsingOAuth: () => true,
         getApiKeyAndHeaders: async () => {
@@ -595,8 +594,26 @@ test("normalizes config and formats percentages without a TUI", () => {
   )
   assert.equal(__test__.formatUsedPercent({ usedPercent: 42.6 }), "43%")
   assert.equal(__test__.formatRemainingPercent({ usedPercent: 42.2 }), "58%")
-  assert.equal(__test__.isChatGptProvider("openai-codex-2"), true)
   assert.equal(__test__.isChatGptProvider("openai"), true)
+  for (const provider of [
+    "openai-codex",
+    "openai-codex-2",
+    "openai-codex-123",
+    "openai-codex-responses",
+    "openai-2",
+    "anthropic",
+    undefined,
+  ]) {
+    assert.equal(__test__.isChatGptProvider(provider), false)
+    assert.equal(
+      __test__.isFastSupportedModel({ provider, id: "gpt-5.5" }),
+      false,
+    )
+    assert.equal(
+      __test__.isUltrafastSupportedModel({ provider, id: "gpt-6-astra" }),
+      false,
+    )
+  }
   const fastModelIds = [
     "gpt-5.4",
     "gpt-5.5",
@@ -606,13 +623,13 @@ test("normalizes config and formats percentages without a TUI", () => {
   ]
   for (const id of fastModelIds) {
     assert.equal(
-      __test__.isFastSupportedModel({ provider: "openai-codex", id }),
+      __test__.isFastSupportedModel({ provider: "openai", id }),
       true,
     )
   }
   for (const id of ["gpt-5.4-mini", "gpt-5.6", "gpt-5.6-sun"]) {
     assert.equal(
-      __test__.isFastSupportedModel({ provider: "openai-codex", id }),
+      __test__.isFastSupportedModel({ provider: "openai", id }),
       false,
     )
   }
@@ -629,13 +646,17 @@ test("normalizes config and formats percentages without a TUI", () => {
     { model: "gpt-6-astra", service_tier: "ultrafast" },
   )
   assert.equal(__test__.addFastServiceTier(null), undefined)
-  for (const provider of ["openai", "openai-codex", "openai-codex-2"]) {
-    for (const id of ["gpt-6-astra", "gpt-6.1-sol"]) {
-      assert.equal(__test__.isUltrafastSupportedModel({ provider, id }), true)
-    }
-    for (const id of ["gpt-5.5", "gpt-6-sol", "gpt-6.1-sol-pro"]) {
-      assert.equal(__test__.isUltrafastSupportedModel({ provider, id }), false)
-    }
+  for (const id of ["gpt-6-astra", "gpt-6.1-sol"]) {
+    assert.equal(
+      __test__.isUltrafastSupportedModel({ provider: "openai", id }),
+      true,
+    )
+  }
+  for (const id of ["gpt-5.5", "gpt-6-sol", "gpt-6.1-sol-pro"]) {
+    assert.equal(
+      __test__.isUltrafastSupportedModel({ provider: "openai", id }),
+      false,
+    )
   }
   assert.equal(
     __test__.isUltrafastSupportedModel({
@@ -652,7 +673,7 @@ test("normalizes config and formats percentages without a TUI", () => {
 
   const ctx = {
     model: {
-      provider: "openai-codex",
+      provider: "openai",
       id: "gpt-5.5",
       contextWindow: 1000,
     },
@@ -678,7 +699,7 @@ test("normalizes config and formats percentages without a TUI", () => {
     )
   }
   ctx.model = {
-    provider: "openai-codex",
+    provider: "openai",
     id: "gpt-6-astra",
     contextWindow: 1000,
   }
@@ -689,7 +710,7 @@ test("normalizes config and formats percentages without a TUI", () => {
     /gpt-6-astra • Ultrafast/,
   )
   ctx.model = {
-    provider: "openai-codex",
+    provider: "openai",
     id: "gpt-5.4-mini",
     contextWindow: 1000,
   }
@@ -702,7 +723,7 @@ test("normalizes config and formats percentages without a TUI", () => {
 test("renders all live extension statuses in the top-right footer", () => {
   const ctx = {
     model: {
-      provider: "openai-codex",
+      provider: "openai",
       id: "gpt-5.6-sol",
       contextWindow: 1000,
     },
@@ -828,7 +849,7 @@ test("speed commands migrate config, patch tiers, report support, and manage inh
 
     const ctx = {
       mode: "rpc",
-      model: { provider: "openai-codex", id: "gpt-5.4" },
+      model: { provider: "openai", id: "gpt-5.4" },
       modelRegistry: { isUsingOAuth: () => true },
       sessionManager: { getBranch: () => [] },
       ui: {
@@ -872,7 +893,7 @@ test("speed commands migrate config, patch tiers, report support, and manage inh
     assert.equal(process.env.PI_CHATGPT_SPEED, "fast")
     process.env.PI_CODING_AGENT_DIR = tempDir
 
-    ctx.model = { provider: "openai-codex", id: "gpt-5.6-sol" }
+    ctx.model = { provider: "openai", id: "gpt-5.6-sol" }
     handlers.get("model_select")?.({ model: ctx.model }, ctx)
     await commands.get("fast").handler("temporary ultrafast", ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "0")
@@ -883,11 +904,11 @@ test("speed commands migrate config, patch tiers, report support, and manage inh
     )
     assert.match(
       notifications.at(-1).message,
-      /Not active: openai-codex\/gpt-5\.6-sol does not support Ultrafast mode.*gpt-6-astra and gpt-6\.1-sol only/,
+      /Not active: openai\/gpt-5\.6-sol does not support Ultrafast mode.*gpt-6-astra and gpt-6\.1-sol only/,
     )
     assert.equal(notifications.at(-1).type, "warning")
 
-    ctx.model = { provider: "openai-codex", id: "gpt-6-astra" }
+    ctx.model = { provider: "openai", id: "gpt-6-astra" }
     handlers.get("model_select")?.({ model: ctx.model }, ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "1")
     assert.equal(process.env.PI_CHATGPT_SPEED, "ultrafast")
@@ -910,7 +931,7 @@ test("speed commands migrate config, patch tiers, report support, and manage inh
       },
     )
 
-    ctx.model = { provider: "openai-codex", id: "gpt-5.5" }
+    ctx.model = { provider: "openai", id: "gpt-5.5" }
     handlers.get("model_select")?.({ model: ctx.model }, ctx)
     await commands.get("fast").handler("persistent", ctx)
     assert.equal(process.env.PI_CHATGPT_FAST, "1")
@@ -1198,14 +1219,71 @@ test("unified openai OAuth supports speed modes and usage, but API keys do not",
     assert.equal(authCalls, 4)
     assert.equal(fetchMock.mock.callCount(), 4)
 
-    // Switching away clears subscription usage without resolving a credential.
-    ctx.model = { ...ctx.model, provider: "anthropic" }
-    handlers.get("model_select")({ model: ctx.model }, ctx)
-    await new Promise(setImmediate)
-    assert.doesNotMatch(footer(), /W 42%/)
-    assert.equal(authCalls, 4)
+    // Excluded providers cannot fetch, accelerate, or display cached quota.
+    for (const provider of ["openai-codex", "openai-codex-2", "anthropic"]) {
+      ctx.model.provider = provider
+      for (const [id, mode] of [
+        ["gpt-5.5", "fast"],
+        ["gpt-6-astra", "ultrafast"],
+        ["gpt-6.1-sol", "ultrafast"],
+      ]) {
+        ctx.model.id = id
+        await commands.get("fast").handler(`temporary ${mode}`, ctx)
+        assert.equal(notifications.at(-1).type, "warning")
+        assert.match(notifications.at(-1).message, /via \/login on openai\./)
+        await commands.get("fast").handler("status", ctx)
+        assert.match(
+          notifications.at(-1).message,
+          /selected; requires ChatGPT OAuth via \/login on openai/,
+        )
+        assert.equal(process.env.PI_CHATGPT_FAST, "0")
+        assert.equal(process.env.PI_CHATGPT_SPEED, mode)
+        assert.equal(
+          handlers.get("before_provider_request")({ payload }, ctx),
+          undefined,
+        )
+        assert.equal(payload.service_tier, "default")
+        assert.doesNotMatch(footer(), /Ultrafast|Fast|W 42%/)
+        for (const command of ["chatgpt", "chatgpt-limit"]) {
+          await commands.get(command).handler("", ctx)
+          assert.equal(
+            notifications.at(-1).message,
+            "ChatGPT limits require an openai model authenticated with ChatGPT OAuth via /login.",
+          )
+        }
+      }
+      await handlers.get("session_start")({}, ctx)
+      handlers.get("model_select")({ model: ctx.model }, ctx)
+      handlers.get("agent_end")({}, ctx)
+      await new Promise(setImmediate)
+      assert.equal(authCalls, 4)
+      assert.equal(fetchMock.mock.callCount(), 4)
+    }
 
+    // Transport API names do not determine provider or OAuth eligibility.
     ctx.model.provider = "openai"
+    ctx.model.api = "openai-codex-responses"
+    await commands.get("fast").handler("temporary ultrafast", ctx)
+    assert.equal(process.env.PI_CHATGPT_FAST, "1")
+    assert.equal(
+      handlers.get("before_provider_request")({ payload }, ctx).service_tier,
+      "ultrafast",
+    )
+    await commands.get("chatgpt").handler("", ctx)
+    assert.match(footer(), /Ultrafast.*W 42%/)
+    assert.equal(ctx.model.api, "openai-codex-responses")
+    assert.equal(authCalls, 5)
+    assert.equal(fetchMock.mock.callCount(), 5)
+    oauth = false
+    await commands.get("chatgpt").handler("", ctx)
+    assert.equal(
+      handlers.get("before_provider_request")({ payload }, ctx),
+      undefined,
+    )
+    assert.equal(fetchMock.mock.callCount(), 5)
+    assert.doesNotMatch(footer(), /Ultrafast|W 42%/)
+    oauth = true
+    ctx.model.api = "openai-responses"
     for (const status of [401, 403, 429, 500]) {
       httpStatus = status
       await commands.get("chatgpt").handler("", ctx)
@@ -1362,33 +1440,6 @@ test(
       )
       assert.match(output, /gpt-5\.5/)
       assert.match(output, /42%/)
-    } finally {
-      await server.close()
-    }
-  },
-)
-
-test(
-  "real pi preserves legacy openai-codex OAuth usage support",
-  { skip: SCRIPT_SKIP },
-  async () => {
-    const token = fakeJwt({
-      "https://api.openai.com/auth": { chatgpt_account_id: "acct_legacy" },
-    })
-    const server = await startUsageServer((req, res) => {
-      assert.equal(req.headers.authorization, `Bearer ${token}`)
-      sendUsageResponse(res)
-    })
-    try {
-      const { output } = await runRealPiTui({
-        baseUrl: server.baseUrl,
-        apiKey: token,
-        provider: "openai-codex",
-        model: "gpt-5.4",
-        waitFor: (text) => stripAnsi(text).includes("W 42%"),
-      })
-      assert.match(stripAnsi(output), /gpt-5\.4/)
-      assert.ok(server.requests.length > 0)
     } finally {
       await server.close()
     }

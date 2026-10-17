@@ -193,31 +193,41 @@ test("OAuth eligibility, routing, idle guard, and lifecycle clearing", async (t)
   await h.command("arm")
   assert.deepEqual(await h.report(), {})
   h.ctx.isIdle = () => true
-  h.ctx.model.provider = "anthropic"
-  await h.command("arm")
-  assert.deepEqual(await h.report(), {})
-  for (const provider of ["openai", "openai-codex", "openai-codex-2"]) {
+  for (const provider of ["anthropic", "openai-codex", "openai-codex-2"]) {
     h.ctx.model.provider = provider
     await h.command("arm")
+    assert.match(h.notifications.at(-1), /select an openai model/)
     await h.emit("before_provider_request")
+    await h.emit("after_provider_response", { headers: unreadable })
     await h.emit("provider_stream_event", {
-      provider: "unrelated",
+      provider,
       model: "gpt-6-astra",
       data: unreadable,
     })
-    await h.emit("provider_stream_event", {
-      provider,
-      model: "unrelated",
-      data: unreadable,
-    })
-    h.ctx.modelRegistry.isUsingOAuth = () => false
-    await h.emit("after_provider_response", { headers: unreadable })
-    assert.equal((await h.report()).responseHooks, 0)
-    assert.equal((await h.report()).streamHooks, 0)
-    h.ctx.modelRegistry.isUsingOAuth = () => true
-    await h.emit("model_select")
     assert.deepEqual(await h.report(), {})
   }
+  h.ctx.model.provider = "openai"
+  await h.command("arm")
+  await h.emit("before_provider_request")
+  for (const provider of ["unrelated", "openai-codex", "openai-codex-2"]) {
+    await h.emit("provider_stream_event", {
+      provider,
+      model: "gpt-6-astra",
+      data: unreadable,
+    })
+  }
+  await h.emit("provider_stream_event", {
+    provider: "openai",
+    model: "unrelated",
+    data: unreadable,
+  })
+  h.ctx.modelRegistry.isUsingOAuth = () => false
+  await h.emit("after_provider_response", { headers: unreadable })
+  assert.equal((await h.report()).responseHooks, 0)
+  assert.equal((await h.report()).streamHooks, 0)
+  h.ctx.modelRegistry.isUsingOAuth = () => true
+  await h.emit("model_select")
+  assert.deepEqual(await h.report(), {})
   await h.command("arm")
   await h.emit("session_shutdown")
   assert.deepEqual(await h.report(), {})

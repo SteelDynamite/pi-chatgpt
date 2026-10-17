@@ -1,5 +1,5 @@
 ---
-description: Owns OAuth-backed ChatGPT Codex quota fetching, `/chatgpt` footer and settings flows, and supported-model `/fast` Standard/Fast/Ultrafast selection with subprocess propagation; supports unified openai and legacy openai-codex with ChatGPT OAuth; excludes API-key sessions and untrusted endpoints.
+description: Owns OAuth-backed ChatGPT Codex quota fetching, `/chatgpt` footer and settings flows, and supported-model `/fast` Standard/Fast/Ultrafast selection with subprocess propagation; supports only unified openai with ChatGPT OAuth; excludes API-key sessions and untrusted endpoints.
 manifest: true
 resumable: true
 ---
@@ -10,7 +10,7 @@ Operate within this repository only. Read `README.md`, `package.json`, `index.js
 
 Key product behavior to preserve:
 
-1. Footer usage appears only for active `openai` or legacy `openai-codex` models authenticated with ChatGPT OAuth through Pi's `/login` flow. Check `modelRegistry.isUsingOAuth(model)` before fetching usage; API keys must never be sent to the usage endpoint.
+1. Footer usage appears only for active `openai` models authenticated with ChatGPT OAuth through Pi's `/login` flow. Check `modelRegistry.isUsingOAuth(model)` before fetching usage; API keys must never be sent to the usage endpoint.
 2. `/chatgpt` shows plan, email when available, 5-hour usage, weekly usage, and reset times; `/chatgpt-limit` is a compatibility alias.
 3. Footer settings support weekly, 5-hour, both, hidden, used/remaining/pace percent, and reset-time variants.
 4. Settings persist globally in `~/.pi/agent/chatgpt.json`; legacy `chatgpt-limit.json` settings migrate automatically.
@@ -20,8 +20,10 @@ Key product behavior to preserve:
 8. Persistent config stores `speedMode` plus the compatibility `fastMode` boolean; normalize existing booleans to Fast/Standard without breaking legacy files.
 9. Usage is fetched from ChatGPT's usage endpoint with the OAuth token already stored by Pi.
 10. `CHATGPT_BASE_URL` is only for trusted testing/proxy infrastructure because bearer tokens are sent to it.
+11. Never support or select obsolete `openai-codex` providers, including numbered variants. Negative regression fixtures may name them. Preserve transport API IDs such as `openai-codex-responses`; they are not provider IDs. Do not migrate credentials by renaming their provider.
+12. Direct-use OAuth quota access remains upstream-blocked (checked 2026-10-12). Retain the HTTP failure status and ChatGPT Settings → Usage fallback. Do not introduce legacy login, require Codex, or guess authenticated endpoints.
 
-Installed Pi 0.99.1 routing: `pi-ai/providers/openai` uses `openai-responses` at `https://api.openai.com/v1` for both API keys and ChatGPT OAuth (`auth/oauth/openai-chatgpt`). `ModelRegistry.isUsingOAuth` reads the runtime's effective auth snapshot; `getApiKeyAndHeaders` resolves the active credential. Do not identify OAuth from `model.api`, `model.baseUrl`, or JWT claims.
+Installed Pi 0.99.1 routing: `pi-ai/providers/openai` uses `openai-responses` at `https://api.openai.com/v1` for both API keys and ChatGPT OAuth (`auth/oauth/openai-chatgpt`). `ModelRegistry.isUsingOAuth` reads the runtime's effective auth snapshot; `getApiKeyAndHeaders` resolves the active credential. Do not identify OAuth from `model.api`, `model.baseUrl`, or JWT claims. The cached OAuth check is not exact-result credential provenance: the known PCG-001 race can resolve an API key after a stale OAuth check. Provider removal does not retire that security debt or PCG-002 session-ownership debt.
 
 Maintenance rules:
 
